@@ -53,7 +53,7 @@ struct SearchView: View {
                     .padding(.top, 1)
 
                 FocusedTextField(text: $viewModel.query, textHeight: $textHeight, onSubmit: {
-                    viewModel.launchSelected()
+                    viewModel.submitMessage()
                 })
                 .frame(height: textHeight)
             }
@@ -71,14 +71,6 @@ struct SearchView: View {
                 .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
         )
         .padding(16)
-        .onKeyPress(.upArrow) {
-            viewModel.moveSelection(up: true)
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            viewModel.moveSelection(up: false)
-            return .handled
-        }
     }
 }
 
@@ -194,7 +186,6 @@ struct MenuItemRow: View {
     }
 
     private func displayText(_ text: String) -> String {
-        // Strip "role: " prefix since the icon now represents it
         if let colonRange = text.range(of: ": ") {
             return String(text[colonRange.upperBound...])
         }
@@ -204,7 +195,6 @@ struct MenuItemRow: View {
     private func iconForItem(_ text: String) -> String {
         let lower = text.lowercased()
 
-        // Specific element roles (from "role: name" format)
         if lower.hasPrefix("button:") { return "hand.tap" }
         if lower.hasPrefix("link:") { return "link" }
         if lower.hasPrefix("text field:") || lower.hasPrefix("text area:") { return "character.cursor.ibeam" }
@@ -232,21 +222,18 @@ struct MenuItemRow: View {
         if lower.hasPrefix("window:") { return "macwindow" }
         if lower.hasPrefix("dock item:") { return "dock.rectangle" }
 
-        // Browser/web-specific items
         if lower.hasPrefix("url:") { return "link.circle" }
         if lower.hasPrefix("id:") { return "number" }
         if lower.hasPrefix("class:") { return "curlybraces" }
         if lower.hasPrefix("href:") { return "arrow.up.right.square" }
         if lower.hasPrefix("tip:") { return "info.circle" }
 
-        // OS-level items (no colon prefix)
         if lower.contains("dock") { return "dock.rectangle" }
         if lower.contains("menu bar") { return "menubar.rectangle" }
         if lower.contains("desktop") { return "desktopcomputer" }
         if lower.contains("widget") { return "widget.small" }
         if lower.contains("notification") { return "bell" }
 
-        // App name (broadest level) — use generic app icon
         return "app"
     }
 }

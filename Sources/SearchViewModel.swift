@@ -2,99 +2,77 @@ import AppKit
 import Combine
 import CoreGraphics
 
-struct AppInfo: Identifiable {
-    let id = UUID()
-    let name: String
-    let url: URL
-    let icon: NSImage?
-}
-
 class SearchViewModel: ObservableObject {
     @Published var query: String = ""
-    @Published var results: [AppInfo] = []
-    @Published var selectedIndex: Int = 0
     @Published var hoveredApp: String = ""
     @Published var hoveredParts: [String] = []
     @Published var selectedText: String = ""
+    @Published var isChatMode = false
+    @Published var claudeManager: ClaudeProcessManager?
+    @Published var chatHistory: [(role: String, text: String)] = []
 
-    private var allApps: [AppInfo] = []
-    private var cancellables = Set<AnyCancellable>()
+    /// Set by FloatingPanel
+    var onSubmit: ((String) -> Void)?
+    var onClose: (() -> Void)?
 
-    init() {
-        loadApps()
+    func submitMessage() {
+        let message = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return }
 
-        // React to query changes with a small debounce
-        $query
-            .debounce(for: .milliseconds(50), scheduler: RunLoop.main)
-            .sink { [weak self] query in
-                self?.search(query: query)
+        if isChatMode {
+            // Follow-up message
+            chatHistory.append((role: "user", text: message))
+            query = ""
+            let manager = ClaudeProcessManager()
+            manager.onComplete = { [weak self] response in
+                self?.chatHistory.append((role: "assistant", text: response))
             }
-            .store(in: &cancellables)
+            claudeManager = manager
+            manager.start(message: message)
+        } else {
+            // First message — switch to chat mode
+            let context = buildContextMessage()
+            onSubmit?(context)
+        }
     }
 
-    func loadApps() {
-        let appDirs = [
-            "/Applications",
-            "/System/Applications",
-            "/System/Applications/Utilities"
-        ]
+    func buildContextMessage() -> String {
+        var lines: [String] = []
 
-        for dir in appDirs {
-            guard let contents = try? FileManager.default.contentsOfDirectory(
-                at: URL(fileURLWithPath: dir),
-                includingPropertiesForKeys: nil
-            ) else { continue }
+        if !hoveredParts.isEmpty {
+            // Last part is most specific element, first is app name
+            let appName = hoveredParts.first ?? ""
+            let element = hoveredParts.count > 1 ? hoveredParts.last! : ""
 
-            for url in contents where url.pathExtension == "app" {
-                let name = url.deletingPathExtension().lastPathComponent
-                let icon = NSWorkspace.shared.icon(forFile: url.path)
-                icon.size = NSSize(width: 32, height: 32)
-                allApps.append(AppInfo(name: name, url: url, icon: icon))
+            if !element.isEmpty {
+                lines.append("I'm looking at: \(element) in \(appName)")
+            } else if !appName.isEmpty {
+                lines.append("I'm looking at: \(appName)")
+            }
+
+            if hoveredParts.count > 1 {
+                lines.append("Path: \(hoveredParts.joined(separator: " → "))")
+            }
+
+            // Extract URL if present
+            for part in hoveredParts {
+                if part.hasPrefix("url: ") {
+                    lines.append("URL: \(String(part.dropFirst(5)))")
+                    break
+                }
             }
         }
 
-        allApps.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
-    func search(query: String) {
-        if query.isEmpty {
-            results = allApps
-            selectedIndex = 0
-            return
+        if !selectedText.isEmpty {
+            lines.append("Selected text: \(selectedText)")
         }
 
-        results = allApps
-            .compactMap { app -> (AppInfo, Int)? in
-                guard let score = matchScore(app.name, query: query) else { return nil }
-                return (app, score)
-            }
-            .sorted { $0.1 > $1.1 }
-            .map { $0.0 }
-
-        selectedIndex = 0
-    }
-
-    func matchScore(_ name: String, query: String) -> Int? {
-        let lowerName = name.lowercased()
-        let lowerQuery = query.lowercased()
-
-        // Exact prefix match — strongest signal
-        if lowerName.hasPrefix(lowerQuery) { return 100 }
-
-        // Word-boundary prefix (e.g., "Chrome" matches "Google Chrome")
-        let words = lowerName.split(separator: " ")
-        for word in words {
-            if word.hasPrefix(lowerQuery) { return 80 }
+        if !lines.isEmpty {
+            lines.append("")
         }
+        lines.append(query)
 
-        // Substring match
-        if lowerName.contains(lowerQuery) { return 60 }
-
-        // Initials match (e.g., "gc" → "Google Chrome")
-        let initials = String(words.compactMap(\.first))
-        if initials.hasPrefix(lowerQuery) { return 40 }
-
-        return nil
+        return lines.joined(separator: "\n")
     }
 
     func updateHoveredApp() {
@@ -340,7 +318,6 @@ class SearchViewModel: ObservableObject {
     private func browserPageURL(pid: pid_t) -> String {
         let appElement = AXUIElementCreateApplication(pid)
 
-        // Try to find the focused window's address bar
         guard let focusedWindow = axValue(appElement, key: kAXFocusedWindowAttribute) else { return "" }
         let window = focusedWindow as! AXUIElement
 
@@ -349,7 +326,7 @@ class SearchViewModel: ObservableObject {
             return truncated(docURL, max: 60)
         }
 
-        // For Chrome/others: find the address bar by searching for a text field with a URL value
+        // For Chrome/others: find the address bar
         if let urlBarValue = findAddressBar(in: window) {
             return truncated(urlBarValue, max: 60)
         }
@@ -361,7 +338,6 @@ class SearchViewModel: ObservableObject {
         let role = axValue(element, key: kAXRoleAttribute) as? String ?? ""
         let subrole = axValue(element, key: kAXSubroleAttribute) as? String ?? ""
 
-        // Chrome's URL bar is a text field with subrole AXURLTextField or role AXTextField in toolbar
         if role == "AXTextField" || subrole == "AXURLTextField" {
             if let value = axValue(element, key: kAXValueAttribute) as? String,
                value.contains(".") && !value.contains(" ") {
@@ -369,11 +345,9 @@ class SearchViewModel: ObservableObject {
             }
         }
 
-        // Search children (only a few levels deep for performance)
         guard let children = axValue(element, key: kAXChildrenAttribute) as? [AXUIElement] else { return nil }
         for child in children.prefix(20) {
             let childRole = axValue(child, key: kAXRoleAttribute) as? String ?? ""
-            // Only descend into toolbars and groups, not the entire web content
             if ["AXToolbar", "AXGroup", "AXSplitGroup"].contains(childRole) {
                 if let found = findAddressBar(in: child) { return found }
             }
@@ -390,25 +364,21 @@ class SearchViewModel: ObservableObject {
     private func webElementInfo(_ element: AXUIElement) -> [String] {
         var info: [String] = []
 
-        // DOM identifier (id attribute)
         if let domID = axValue(element, key: "AXDOMIdentifier") as? String, !domID.isEmpty {
             info.append("id: #\(domID)")
         }
 
-        // DOM class list
         if let classList = axValue(element, key: "AXDOMClassList") as? [String], !classList.isEmpty {
             let classes = classList.prefix(3).joined(separator: ".")
             info.append("class: .\(classes)")
         }
 
-        // Link URL
         if let url = axValue(element, key: "AXURL") as? URL {
             info.append("href: \(truncated(url.absoluteString, max: 50))")
         } else if let url = axValue(element, key: "AXURL") as? String, !url.isEmpty {
             info.append("href: \(truncated(url, max: 50))")
         }
 
-        // HTML tag via help text or computed role
         if let help = axValue(element, key: kAXHelpAttribute) as? String, !help.isEmpty {
             info.append("tip: \(truncated(help, max: 40))")
         }
@@ -417,10 +387,8 @@ class SearchViewModel: ObservableObject {
     }
 
     private func humanRole(_ role: String, subrole: String, roleDesc: String) -> String {
-        // Use the system-provided role description if available (already localized)
         if !roleDesc.isEmpty { return roleDesc }
 
-        // Fallback mapping for common roles
         let map: [String: String] = [
             "AXButton": "button",
             "AXTextField": "text field",
@@ -477,24 +445,5 @@ class SearchViewModel: ObservableObject {
         var value: AnyObject?
         AXUIElementCopyAttributeValue(element, key as CFString, &value)
         return value
-    }
-
-    func moveSelection(up: Bool) {
-        if up {
-            selectedIndex = max(0, selectedIndex - 1)
-        } else {
-            selectedIndex = min(results.count - 1, selectedIndex + 1)
-        }
-    }
-
-    func launchSelected() {
-        guard selectedIndex >= 0 && selectedIndex < results.count else { return }
-        let app = results[selectedIndex]
-        NSWorkspace.shared.open(app.url)
-
-        // Close the panel after launching
-        if let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) {
-            panel.close()
-        }
     }
 }

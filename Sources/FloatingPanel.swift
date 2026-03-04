@@ -6,7 +6,8 @@ class FloatingPanel: NSPanel {
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
     private var globalClickMonitor: Any?
-    private var hostingView: NSHostingView<SearchView>!
+    private var hostingView: NSHostingView<PanelContentView>!
+    private var isTerminalMode = false
 
     init() {
         super.init(
@@ -23,8 +24,16 @@ class FloatingPanel: NSPanel {
         hasShadow = false
         hidesOnDeactivate = false
 
-        hostingView = NSHostingView(rootView: SearchView(viewModel: searchViewModel))
+        hostingView = NSHostingView(rootView: PanelContentView(viewModel: searchViewModel))
         contentView = hostingView
+
+        // Wire up the submit callback
+        searchViewModel.onSubmit = { [weak self] context in
+            self?.transitionToTerminal(message: context)
+        }
+        searchViewModel.onClose = { [weak self] in
+            self?.close()
+        }
     }
 
     override var canBecomeKey: Bool { true }
@@ -32,7 +41,6 @@ class FloatingPanel: NSPanel {
 
     func show() {
         searchViewModel.query = ""
-        searchViewModel.selectedIndex = 0
 
         positionAtCursor()
         makeKeyAndOrderFront(nil)
@@ -51,12 +59,32 @@ class FloatingPanel: NSPanel {
 
         // Dismiss on any click outside
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
-            self?.close()
+            guard let self = self, !self.isTerminalMode else { return }
+            self.close()
         }
     }
 
+    func transitionToTerminal(message: String) {
+        isTerminalMode = true
+        removeAllMonitors()
+
+        // Switch to chat mode — the PanelContentView handles the rest
+        searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query))
+        searchViewModel.query = ""
+
+        let manager = ClaudeProcessManager()
+        manager.onComplete = { [weak self] response in
+            self?.searchViewModel.chatHistory.append((role: "assistant", text: response))
+            self?.searchViewModel.claudeManager = nil
+        }
+        searchViewModel.claudeManager = manager
+        searchViewModel.isChatMode = true
+
+        manager.start(message: message)
+    }
+
     private func positionAtCursor() {
-        // Let the hosting view determine its ideal size
+        guard !isTerminalMode else { return }
         let fittingSize = hostingView.fittingSize
         setContentSize(fittingSize)
 
@@ -87,6 +115,10 @@ class FloatingPanel: NSPanel {
         removeAllMonitors()
         super.close()
         searchViewModel.query = ""
+        searchViewModel.isChatMode = false
+        searchViewModel.chatHistory = []
+        searchViewModel.claudeManager = nil
+        isTerminalMode = false
     }
 
     // Handle Escape to close
