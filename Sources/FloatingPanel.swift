@@ -39,6 +39,36 @@ class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    func show(at point: NSPoint) {
+        searchViewModel.query = ""
+        searchViewModel.updateHoveredApp()
+
+        let fittingSize = hostingView.fittingSize
+        setContentSize(fittingSize)
+
+        // Position at click point with slight offset, clamped to screen
+        let x = point.x + 4
+        let y = point.y - fittingSize.height - 4
+
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
+            let sf = screen.visibleFrame
+            let clampedX = max(sf.minX, min(x, sf.maxX - fittingSize.width))
+            let clampedY = max(sf.minY, y)
+            setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
+        } else {
+            setFrameOrigin(NSPoint(x: x, y: y))
+        }
+
+        makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Dismiss on click outside (no mouse-move monitors — panel stays anchored)
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+            guard let self = self, !self.isTerminalMode else { return }
+            self.close()
+        }
+    }
+
     func show() {
         searchViewModel.query = ""
 
