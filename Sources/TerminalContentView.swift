@@ -2,6 +2,22 @@ import AppKit
 import SwiftUI
 import Combine
 
+// MARK: - Stream Event Models
+
+enum StreamEvent: Identifiable, Equatable {
+    case thinking(id: String, text: String)
+    case toolCall(id: String, name: String, input: String)
+    case text(id: String, text: String)
+
+    var id: String {
+        switch self {
+        case .thinking(let id, _): return id
+        case .toolCall(let id, _, _): return id
+        case .text(let id, _): return id
+        }
+    }
+}
+
 // MARK: - Stream Status
 
 enum StreamStatus: Equatable {
@@ -16,6 +32,7 @@ enum StreamStatus: Equatable {
 class ClaudeProcessManager: ObservableObject {
     @Published var outputText = ""
     @Published var status: StreamStatus = .waiting
+    @Published var events: [StreamEvent] = []
     var onComplete: ((String) -> Void)?
     var sessionId: String?
 
@@ -24,6 +41,8 @@ class ClaudeProcessManager: ObservableObject {
     private let queue = DispatchQueue(label: "claude-stream", qos: .userInitiated)
 
     func start(message: String, resumeSessionId: String? = nil) {
+        // Reset stale events from previous messages
+        DispatchQueue.main.async { self.events = [] }
         guard let claudePath = resolveClaudePath() else {
             status = .error("Could not find 'claude' binary")
             return
@@ -35,9 +54,9 @@ class ClaudeProcessManager: ObservableObject {
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         var claudeCmd: String
         if let sid = resumeSessionId {
-            claudeCmd = "\(claudePath) --resume \(sid) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+            claudeCmd = "\(claudePath) --print --resume \(sid) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
         } else {
-            claudeCmd = "\(claudePath) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+            claudeCmd = "\(claudePath) --print -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
         }
         process.arguments = ["-l", "-c", claudeCmd]
         process.standardInput = FileHandle.nullDevice
@@ -117,9 +136,10 @@ class ClaudeProcessManager: ObservableObject {
                 continue
             }
 
-            if let text = extractText(from: line) {
-                DispatchQueue.main.async {
-                    if case .waiting = self.status { self.status = .streaming }
+            let text = extractText(from: line)
+            DispatchQueue.main.async {
+                if case .waiting = self.status { self.status = .streaming }
+                if let text = text {
                     self.outputText = text
                 }
             }
@@ -137,7 +157,7 @@ class ClaudeProcessManager: ObservableObject {
 
         // Capture session ID from system init message
         if type == "system",
-           let sid = json["sessionId"] as? String {
+           let sid = json["session_id"] as? String {
             DispatchQueue.main.async { self.sessionId = sid }
             return nil
         }
@@ -145,7 +165,6 @@ class ClaudeProcessManager: ObservableObject {
         // Final result — complete text, use as source of truth
         if type == "result",
            let result = json["result"] as? String {
-            // Also check for session_id in result message
             if let sid = json["session_id"] as? String {
                 DispatchQueue.main.async { self.sessionId = sid }
             }
@@ -153,27 +172,62 @@ class ClaudeProcessManager: ObservableObject {
             return accumulated
         }
 
-        // content_block_delta — streaming text tokens
-        if type == "content_block_delta",
-           let delta = json["delta"] as? [String: Any],
-           let deltaType = delta["type"] as? String,
-           deltaType == "text_delta",
-           let text = delta["text"] as? String {
-            accumulated += text
-            return accumulated
-        }
-
-        // Verbose assistant message with full content array
+        // CLI format: assistant messages contain complete content arrays
         if type == "assistant",
            let message = json["message"] as? [String: Any],
            let content = message["content"] as? [[String: Any]] {
             for block in content {
-                if block["type"] as? String == "text",
-                   let text = block["text"] as? String {
+                guard let blockType = block["type"] as? String else { continue }
+
+                if blockType == "thinking",
+                   let thinkingText = block["thinking"] as? String {
+                    let blockId = UUID().uuidString
+                    DispatchQueue.main.async {
+                        self.events.append(.thinking(id: blockId, text: thinkingText))
+                    }
+                } else if blockType == "tool_use" {
+                    let blockId = block["id"] as? String ?? UUID().uuidString
+                    let name = block["name"] as? String ?? "unknown"
+                    var inputStr = ""
+                    if let input = block["input"] {
+                        if let inputData = try? JSONSerialization.data(withJSONObject: input),
+                           let inputJson = String(data: inputData, encoding: .utf8) {
+                            inputStr = inputJson
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        self.events.append(.toolCall(id: blockId, name: name, input: inputStr))
+                    }
+                } else if blockType == "text",
+                          let text = block["text"] as? String {
                     accumulated = text
-                    return accumulated
+                    // Don't set hasText — only show text from "result" event
                 }
             }
+            return nil
+        }
+
+        // CLI format: user messages contain tool results
+        if type == "user",
+           let message = json["message"] as? [String: Any],
+           let content = message["content"] as? [[String: Any]] {
+            for block in content {
+                if block["type"] as? String == "tool_result",
+                   let toolUseId = block["tool_use_id"] as? String,
+                   let resultContent = block["content"] as? String {
+                    // Update matching tool call event with output info
+                    let preview = String(resultContent.prefix(200))
+                    DispatchQueue.main.async {
+                        if let idx = self.events.firstIndex(where: { $0.id == toolUseId }),
+                           case let .toolCall(id, name, input) = self.events[idx] {
+                            // Append result preview to input for display
+                            let combined = input.isEmpty ? preview : input + "\n→ " + preview
+                            self.events[idx] = .toolCall(id: id, name: name, input: combined)
+                        }
+                    }
+                }
+            }
+            return nil
         }
 
         return nil
@@ -208,6 +262,241 @@ class ClaudeProcessManager: ObservableObject {
 
     deinit {
         process?.terminate()
+    }
+}
+
+// MARK: - Streaming Timer View
+
+struct StreamingTimerView: View {
+    @State private var elapsed: TimeInterval = 0
+    @State private var animateIcon = false
+
+    let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "circle.grid.2x2.fill")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .opacity(animateIcon ? 0.4 : 1.0)
+                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateIcon)
+
+            Text(String(format: "%.1fs", elapsed))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+        .onAppear {
+            elapsed = 0
+            animateIcon = true
+        }
+        .onReceive(timer) { _ in
+            elapsed += 0.1
+        }
+    }
+}
+
+// MARK: - Thinking Event Row
+
+struct ThinkingEventRow: View {
+    let text: String
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+
+                Text("Thinking")
+                    .font(.system(size: 12, weight: .bold))
+
+                if !isExpanded {
+                    Text(text)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+
+            if isExpanded {
+                Text(text)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 22)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { isExpanded.toggle() }
+    }
+}
+
+// MARK: - Tool Call Event Row
+
+struct ToolCallEventRow: View {
+    let name: String
+    let input: String
+    @State private var isExpanded = false
+
+    var body: some View {
+        Button(action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: iconName(for: name))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .frame(width: 14, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName(for: name))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.primary)
+
+                    if !inputPreview.isEmpty {
+                        Text(isExpanded ? input : inputPreview)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(isExpanded ? nil : 1)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var inputPreview: String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let data = trimmed.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let cmd = json["command"] as? String {
+                return cmd.components(separatedBy: .newlines).first ?? cmd
+            }
+            if let path = json["file_path"] as? String {
+                return path
+            }
+            if let pattern = json["pattern"] as? String {
+                return pattern
+            }
+            if let query = json["query"] as? String {
+                return query
+            }
+        }
+        return trimmed.components(separatedBy: .newlines).first ?? trimmed
+    }
+
+    private func iconName(for tool: String) -> String {
+        switch tool.lowercased() {
+        case "bash": return "terminal"
+        case "read": return "doc.text"
+        case "write": return "square.and.pencil"
+        case "edit": return "square.and.pencil"
+        case "glob": return "doc.text.magnifyingglass"
+        case "grep": return "magnifyingglass"
+        default: return "wrench"
+        }
+    }
+
+    private func displayName(for tool: String) -> String {
+        switch tool.lowercased() {
+        case "bash": return "Run command"
+        case "read": return "Read file"
+        case "write": return "Write file"
+        case "edit": return "Edit file"
+        case "glob": return "Search files"
+        case "grep": return "Search content"
+        default: return tool
+        }
+    }
+}
+
+// MARK: - Events Summary View
+
+struct EventsSummaryView: View {
+    @ObservedObject var manager: ClaudeProcessManager
+    @State private var isExpanded = false
+
+    private var toolCallCount: Int {
+        manager.events.filter {
+            if case .toolCall = $0 { return true }
+            return false
+        }.count
+    }
+
+    private var messageCount: Int {
+        manager.events.filter {
+            if case .thinking = $0 { return true }
+            return false
+        }.count
+    }
+
+    private var summaryText: String {
+        var parts: [String] = []
+        if toolCallCount > 0 {
+            parts.append("\(toolCallCount) tool call\(toolCallCount == 1 ? "" : "s")")
+        }
+        if messageCount > 0 {
+            parts.append("\(messageCount) message\(messageCount == 1 ? "" : "s")")
+        }
+        return parts.isEmpty ? "No events" : parts.joined(separator: ", ")
+    }
+
+    var body: some View {
+        if manager.events.isEmpty {
+            EmptyView()
+        } else if manager.status == .done {
+            // Collapsed summary with expand/collapse toggle
+            VStack(alignment: .leading, spacing: 4) {
+                Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 10)
+
+                        Text(summaryText)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+
+                        Image(systemName: "terminal")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if isExpanded {
+                    ForEach(manager.events) { event in
+                        eventRow(for: event)
+                    }
+                }
+            }
+        } else {
+            // Live streaming — show all events individually
+            ForEach(manager.events) { event in
+                eventRow(for: event)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func eventRow(for event: StreamEvent) -> some View {
+        switch event {
+        case .thinking(_, let text):
+            ThinkingEventRow(text: text)
+        case .toolCall(_, let name, let input):
+            ToolCallEventRow(name: name, input: input)
+        case .text:
+            EmptyView()
+        }
     }
 }
 
@@ -269,13 +558,24 @@ struct ChatView: View {
                             }
                         }
 
+                        if let manager = viewModel.claudeManager {
+                            EventsSummaryView(manager: manager)
+                        }
+
                         if let manager = viewModel.claudeManager,
-                           !manager.outputText.isEmpty {
+                           manager.status == .waiting || manager.status == .streaming {
+                            StreamingTimerView()
+                        }
+
+                        if let manager = viewModel.claudeManager,
+                           !manager.outputText.isEmpty,
+                           manager.status == .done {
                             Text(manager.outputText)
                                 .font(.system(size: 13))
                                 .textSelection(.enabled)
-                                .id("bottom")
                         }
+
+                        Spacer().frame(height: 0).id("bottom")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
@@ -319,7 +619,7 @@ struct ChatView: View {
     private func statusIndicator(for manager: ClaudeProcessManager) -> some View {
         switch manager.status {
         case .waiting:
-            ProgressView().controlSize(.small)
+            Circle().fill(.orange).frame(width: 6, height: 6)
         case .streaming:
             Circle().fill(.green).frame(width: 6, height: 6)
         case .done:
@@ -333,7 +633,7 @@ struct ChatView: View {
     private func statusLabel(for manager: ClaudeProcessManager) -> some View {
         switch manager.status {
         case .waiting:
-            Text("Thinking...").font(.caption2).foregroundColor(.secondary)
+            Text("Connecting...").font(.caption2).foregroundColor(.secondary)
         case .streaming:
             Text("Streaming...").font(.caption2).foregroundColor(.green)
         case .done:
