@@ -10,6 +10,7 @@ class SearchViewModel: ObservableObject {
     @Published var isChatMode = false
     @Published var claudeManager: ClaudeProcessManager?
     @Published var chatHistory: [(role: String, text: String)] = []
+    var currentSessionId: String?
 
     /// Set by FloatingPanel
     var onSubmit: ((String) -> Void)?
@@ -20,15 +21,21 @@ class SearchViewModel: ObservableObject {
         guard !message.isEmpty else { return }
 
         if isChatMode {
-            // Follow-up message
+            // Follow-up message — resume the existing session
             chatHistory.append((role: "user", text: message))
             query = ""
             let manager = ClaudeProcessManager()
             manager.onComplete = { [weak self] response in
+                // Clear streaming text before appending to history to avoid duplicate display
+                manager.outputText = ""
                 self?.chatHistory.append((role: "assistant", text: response))
+                // Update session ID in case it changed
+                if let sid = manager.sessionId {
+                    self?.currentSessionId = sid
+                }
             }
             claudeManager = manager
-            manager.start(message: message)
+            manager.start(message: message, resumeSessionId: currentSessionId)
         } else {
             // First message — switch to chat mode
             let context = buildContextMessage()

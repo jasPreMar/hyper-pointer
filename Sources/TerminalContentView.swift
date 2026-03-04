@@ -17,12 +17,13 @@ class ClaudeProcessManager: ObservableObject {
     @Published var outputText = ""
     @Published var status: StreamStatus = .waiting
     var onComplete: ((String) -> Void)?
+    var sessionId: String?
 
     private var process: Process?
     private var buffer = Data()
     private let queue = DispatchQueue(label: "claude-stream", qos: .userInitiated)
 
-    func start(message: String) {
+    func start(message: String, resumeSessionId: String? = nil) {
         guard let claudePath = resolveClaudePath() else {
             status = .error("Could not find 'claude' binary")
             return
@@ -32,9 +33,13 @@ class ClaudeProcessManager: ObservableObject {
         self.process = process
 
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c",
-            "\(claudePath) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
-        ]
+        var claudeCmd: String
+        if let sid = resumeSessionId {
+            claudeCmd = "\(claudePath) --resume \(sid) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+        } else {
+            claudeCmd = "\(claudePath) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+        }
+        process.arguments = ["-l", "-c", claudeCmd]
         process.standardInput = FileHandle.nullDevice
 
         // Build clean environment
@@ -130,9 +135,20 @@ class ClaudeProcessManager: ObservableObject {
             return nil
         }
 
+        // Capture session ID from system init message
+        if type == "system",
+           let sid = json["sessionId"] as? String {
+            DispatchQueue.main.async { self.sessionId = sid }
+            return nil
+        }
+
         // Final result — complete text, use as source of truth
         if type == "result",
            let result = json["result"] as? String {
+            // Also check for session_id in result message
+            if let sid = json["session_id"] as? String {
+                DispatchQueue.main.async { self.sessionId = sid }
+            }
             accumulated = result
             return accumulated
         }

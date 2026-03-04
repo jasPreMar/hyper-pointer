@@ -104,7 +104,13 @@ class FloatingPanel: NSPanel {
 
         let manager = ClaudeProcessManager()
         manager.onComplete = { [weak self] response in
+            // Clear streaming text before appending to history to avoid duplicate display
+            manager.outputText = ""
             self?.searchViewModel.chatHistory.append((role: "assistant", text: response))
+            // Capture session ID for follow-up messages
+            if let sid = manager.sessionId {
+                self?.searchViewModel.currentSessionId = sid
+            }
             self?.searchViewModel.claudeManager = nil
         }
         searchViewModel.claudeManager = manager
@@ -148,6 +154,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.isChatMode = false
         searchViewModel.chatHistory = []
         searchViewModel.claudeManager = nil
+        searchViewModel.currentSessionId = nil
         isTerminalMode = false
     }
 
