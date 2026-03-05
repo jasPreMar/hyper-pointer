@@ -218,7 +218,8 @@ class SearchViewModel: ObservableObject {
         "AXRadioButton", "AXSlider", "AXPopUpButton", "AXComboBox",
         "AXMenuItem", "AXMenuBarItem", "AXTab", "AXCell", "AXRow",
         "AXHeading", "AXDockItem", "AXDisclosureTriangle",
-        "AXColorWell", "AXIncrementor"
+        "AXColorWell", "AXIncrementor",
+        "AXStaticText", "AXImage"
     ]
 
     // Container roles — good as ancestor context but too broad as primary
@@ -234,7 +235,8 @@ class SearchViewModel: ObservableObject {
             "AXMenuItem", "AXMenuBarItem", "AXTab", "AXCell", "AXRow",
             "AXHeading", "AXDockItem", "AXDisclosureTriangle",
             "AXColorWell", "AXIncrementor",
-            "AXList", "AXTable", "AXOutline", "AXToolbar", "AXTabGroup"
+            "AXList", "AXTable", "AXOutline", "AXToolbar", "AXTabGroup",
+            "AXStaticText", "AXImage"
         ]
         return s
     }()
@@ -245,6 +247,12 @@ class SearchViewModel: ObservableObject {
 
         // If the leaf is already a primary interactive element, use it
         if primaryRoles.contains(leafRole) {
+            return (element, collectAncestors(above: element))
+        }
+
+        // If the leaf has selected text, use it directly — like right-click on a selection
+        let leafSel = axValue(element, key: kAXSelectedTextAttribute) as? String ?? ""
+        if !leafSel.isEmpty {
             return (element, collectAncestors(above: element))
         }
 
@@ -329,7 +337,19 @@ class SearchViewModel: ObservableObject {
         let value = axValue(primary, key: kAXValueAttribute) as? String ?? ""
 
         let readableRole = humanRole(role, subrole: subrole, roleDesc: roleDesc)
-        let elementName = firstNonEmpty(title, desc, truncated(value, max: 40))
+
+        // For static text, prefer value (the text content itself) over title/desc
+        let elementName: String
+        if role == "AXStaticText" {
+            let textContent = firstNonEmpty(value, title, desc)
+            elementName = truncated(textContent, max: 60)
+        } else {
+            elementName = firstNonEmpty(title, desc, truncated(value, max: 40))
+        }
+
+        // Check if the primary element has selected text — treat it as "selected text" context
+        let primarySel = axValue(primary, key: kAXSelectedTextAttribute) as? String ?? ""
+        let hasSelection = !primarySel.isEmpty
 
         var parts: [String] = []
 
@@ -356,7 +376,9 @@ class SearchViewModel: ObservableObject {
             let webInfo = webElementInfo(primary)
             if !webInfo.isEmpty { parts.append(contentsOf: webInfo) }
 
-            if !elementName.isEmpty {
+            if hasSelection {
+                parts.append("selected text: \(truncated(primarySel, max: 60))")
+            } else if !elementName.isEmpty {
                 parts.append("\(readableRole): \(elementName)")
             } else if !readableRole.isEmpty && readableRole != "web content" {
                 parts.append(readableRole)
@@ -376,7 +398,9 @@ class SearchViewModel: ObservableObject {
                 }
             }
 
-            if !elementName.isEmpty {
+            if hasSelection {
+                parts.append("selected text: \(truncated(primarySel, max: 60))")
+            } else if !elementName.isEmpty {
                 parts.append("\(readableRole): \(elementName)")
             } else if !readableRole.isEmpty {
                 parts.append(readableRole)
@@ -488,9 +512,11 @@ class SearchViewModel: ObservableObject {
             "AXWindow": "window",
             "AXSheet": "sheet",
             "AXDialog": "dialog",
+            "AXPanel": "panel",
             "AXMenuBar": "menu bar",
             "AXMenuBarItem": "menu",
             "AXMenuItem": "menu item",
+            "AXMenuButton": "menu button",
             "AXMenu": "menu",
             "AXDockItem": "dock item",
             "AXWebArea": "web content",
