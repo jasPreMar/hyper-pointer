@@ -1,0 +1,75 @@
+BINARY    := .build/debug/HyperPointer
+CERT_NAME := HyperPointer Dev
+BUNDLE_ID := com.hyperpointer.app
+USER_TCC  := $(HOME)/Library/Application Support/com.apple.TCC/TCC.db
+
+.PHONY: build run sign grant reset-tcc cert-instructions
+
+# Build and sign (sign only if cert exists)
+build:
+	swift build
+	@$(MAKE) --no-print-directory sign
+
+# Sign with stable identity if cert exists; otherwise skip silently.
+# TCC grants written by `sudo make grant` use NULL csreq and persist via bundle ID alone.
+sign:
+	@if security find-identity -v -p codesigning 2>/dev/null | grep -q "$(CERT_NAME)"; then \
+		codesign --force --sign "$(CERT_NAME)" --timestamp=none "$(BINARY)" && \
+		echo "Signed with '$(CERT_NAME)'."; \
+	fi
+
+run: build
+	"$(BINARY)"
+
+# Create a self-signed code-signing cert via Keychain Access (one-time setup).
+cert-instructions:
+	@echo ""
+	@echo "Create a self-signed code-signing cert (one-time):"
+	@echo ""
+	@echo "  1. Open Keychain Access"
+	@echo "  2. Menu: Keychain Access → Certificate Assistant → Create a Certificate"
+	@echo "  3. Name: $(CERT_NAME)"
+	@echo "  4. Identity Type: Self Signed Root"
+	@echo "  5. Certificate Type: Code Signing"
+	@echo "  6. Click Create"
+	@echo ""
+	@echo "After that, 'make build' will sign the binary automatically."
+	@echo ""
+	@open "/System/Library/CoreServices/Applications/Keychain Access.app"
+
+# Write TCC grants directly — no permission dialogs ever.
+# Usage: sudo make grant
+grant:
+	@if [ "$$(id -u)" != "0" ]; then \
+		echo "Run as: sudo make grant"; exit 1; \
+	fi
+	@echo "Writing TCC grants for $(BUNDLE_ID)..."
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=UNUSED
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.finder
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.reminders
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.iCal
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.mail
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.Notes
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.Safari
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.Terminal
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.googlecode.iterm2
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.microsoft.VSCode
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.systempreferences
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceScreenCapture TARGET=UNUSED
+	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAccessibility TARGET=UNUSED
+	@echo "Done. Relaunch HyperPointer — no permission popups."
+
+_grant:
+	@sqlite3 "$(USER_TCC)" \
+		"INSERT OR REPLACE INTO access \
+		 (service, client, client_type, auth_value, auth_reason, auth_version, \
+		  indirect_object_identifier, flags, last_modified) \
+		 VALUES('$(SVC)', '$(BUNDLE_ID)', 0, 2, 4, 1, '$(TARGET)', 0, \
+		  CAST(strftime('%s','now') AS INTEGER));" \
+	&& echo "  ✓ $(SVC)$(if $(filter-out UNUSED,$(TARGET)), → $(TARGET))" \
+	|| echo "  ✗ $(SVC) failed"
+
+# Clear all TCC grants for this app (useful for testing)
+reset-tcc:
+	tccutil reset All $(BUNDLE_ID)
+	@echo "All TCC grants cleared."
