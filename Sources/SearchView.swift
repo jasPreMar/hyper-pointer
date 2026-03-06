@@ -29,18 +29,14 @@ struct SearchView: View {
                     .padding(.horizontal, 8)
             }
 
-            // Menu items — most specific first
-            let reversed = Array(viewModel.hoveredParts.reversed())
-            ForEach(Array(reversed.enumerated()), id: \.offset) { index, part in
-                MenuItemRow(text: part, isFirst: index == 0)
+            // Visible object row — show only the lowest level, with the top-level context as an icon.
+            if let visiblePart = viewModel.hoveredParts.last {
+                MenuItemRow(
+                    text: visiblePart,
+                    appIcon: viewModel.hoveredContextIcon,
+                    contextText: viewModel.hoveredParts.first
+                )
 
-                if index < reversed.count - 1 {
-                    Divider()
-                        .padding(.horizontal, 8)
-                }
-            }
-
-            if !viewModel.hoveredParts.isEmpty {
                 Divider()
                     .padding(.horizontal, 8)
             }
@@ -165,24 +161,38 @@ struct FocusedTextField: NSViewRepresentable {
 
 struct MenuItemRow: View {
     let text: String
-    let isFirst: Bool
+    let appIcon: NSImage?
+    let contextText: String?
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: iconForItem(text))
-                .font(.system(size: 11))
-                .foregroundColor(isFirst ? .primary : .secondary)
-                .frame(width: 16, alignment: .center)
+            leadingIcon
+                .frame(width: 16, height: 16, alignment: .center)
 
             Text(displayText(text))
                 .font(.system(size: 13))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .foregroundColor(isFirst ? .primary : .secondary)
+                .foregroundColor(.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
+    }
+
+    @ViewBuilder
+    private var leadingIcon: some View {
+        if let appIcon {
+            Image(nsImage: appIcon)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        } else {
+            Image(systemName: iconForItem(contextText ?? text))
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
     }
 
     private func displayText(_ text: String) -> String {
