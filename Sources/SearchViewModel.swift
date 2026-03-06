@@ -6,6 +6,7 @@ class SearchViewModel: ObservableObject {
     @Published var query: String = ""
     @Published var hoveredApp: String = ""
     @Published var hoveredParts: [String] = []
+    @Published var hoveredContextIcon: NSImage?
     @Published var selectedText: String = ""
     @Published var isChatMode = false
     @Published var claudeManager: ClaudeProcessManager?
@@ -194,6 +195,8 @@ class SearchViewModel: ObservableObject {
 
         guard result == .success, let element = element else {
             hoveredApp = ""
+            hoveredParts = []
+            hoveredContextIcon = nil
             return
         }
 
@@ -202,6 +205,9 @@ class SearchViewModel: ObservableObject {
         AXUIElementGetPid(element, &pid)
         if let app = NSRunningApplication(processIdentifier: pid), app.localizedName != "HyperPointer" {
             hoveredAppPID = pid
+            hoveredContextIcon = app.icon
+        } else {
+            hoveredContextIcon = nil
         }
 
         // Build a description from the element hierarchy
