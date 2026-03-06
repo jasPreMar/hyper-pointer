@@ -5,6 +5,38 @@ struct SearchView: View {
     @State private var textHeight: CGFloat = 18
 
     var body: some View {
+        if viewModel.isMinimalMode {
+            minimalIndicator
+        } else {
+            fullPanel
+        }
+    }
+
+    private var minimalIndicator: some View {
+        Group {
+            if let icon = viewModel.hoveredContextIcon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                Image(systemName: "command")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.primary)
+            }
+        }
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
+        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.15), lineWidth: 0.5))
+        .padding(16)
+    }
+
+    private var fullPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Selected/highlighted text
             if !viewModel.selectedText.isEmpty {
@@ -41,20 +73,22 @@ struct SearchView: View {
                     .padding(.horizontal, 8)
             }
 
-            // Command input at the bottom
-            HStack(alignment: .top, spacing: 4) {
-                Text(">")
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .padding(.top, 1)
+            // Command input at the bottom — hidden while ⌘ is held
+            if !viewModel.isCommandKeyMode {
+                HStack(alignment: .top, spacing: 4) {
+                    Text(">")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.top, 1)
 
-                FocusedTextField(text: $viewModel.query, textHeight: $textHeight, onSubmit: {
-                    viewModel.submitMessage()
-                })
-                .frame(height: textHeight)
+                    FocusedTextField(text: $viewModel.query, textHeight: $textHeight, onSubmit: {
+                        viewModel.submitMessage()
+                    })
+                    .frame(height: textHeight)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
         }
         .frame(minWidth: 180, maxWidth: 360)
         .fixedSize()

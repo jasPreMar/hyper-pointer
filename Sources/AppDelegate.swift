@@ -49,6 +49,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panels: [FloatingPanel] = []
     var hotKeyMonitor: Any?
     fileprivate var eventTap: CFMachPort?
+    private var flagsMonitor: Any?
+    private var localFlagsMonitor: Any?
+    private var commandKeyHeld = false
+    private weak var commandKeyPanel: FloatingPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
@@ -69,6 +73,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
             return event
+        }
+
+        // Hold ⌘ to activate panel; release before sending = dismiss, release after = keep
+        flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlagsChanged(event)
+        }
+        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlagsChanged(event)
+            return event
+        }
+    }
+
+    private func handleFlagsChanged(_ event: NSEvent) {
+        let commandDown = event.modifierFlags.contains(.command)
+        if commandDown && !commandKeyHeld {
+            commandKeyHeld = true
+
+            // Reuse an existing visible non-chat panel if one exists
+            if let existing = panels.first(where: {
+                $0.isVisible && !$0.searchViewModel.isChatMode
+            }) {
+                commandKeyPanel = existing
+                existing.isCommandKeyHeld = true
+                existing.restartCommandKeyMode()
+            } else {
+                panels.removeAll { !$0.isVisible }
+                let panel = FloatingPanel()
+                commandKeyPanel = panel
+                panels.append(panel)
+                panel.startCommandKeyMode()
+            }
+        } else if !commandDown && commandKeyHeld {
+            commandKeyHeld = false
+            if let panel = commandKeyPanel {
+                panel.isCommandKeyHeld = false
+                panel.endCommandKeyMode()
+            }
+            commandKeyPanel = nil
         }
     }
 

@@ -9,6 +9,8 @@ class SearchViewModel: ObservableObject {
     @Published var hoveredContextIcon: NSImage?
     @Published var selectedText: String = ""
     @Published var isChatMode = false
+    @Published var isCommandKeyMode = false
+    @Published var isMinimalMode = false
     @Published var claudeManager: ClaudeProcessManager?
     @Published var chatHistory: [(role: String, text: String)] = []
     @Published var lastScreenshotStatus: String = ""
