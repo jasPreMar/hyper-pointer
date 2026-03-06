@@ -862,6 +862,21 @@ struct ChatView: View {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
+                .onChange(of: viewModel.chatHistory.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.claudeManager?.status) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
             }
 
             // Input field
