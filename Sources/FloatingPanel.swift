@@ -6,8 +6,11 @@ class FloatingPanel: NSPanel {
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
     private var globalClickMonitor: Any?
+    private var commandKeyMouseMonitor: Any?
     private var hostingView: NSHostingView<PanelContentView>!
     private var isTerminalMode = false
+    private var isCommandKeyVisible = false
+    var isCommandKeyHeld = false
 
     init() {
         super.init(
@@ -149,13 +152,97 @@ class FloatingPanel: NSPanel {
         }
     }
 
+    // MARK: - Command key mode
+
+    /// Called when ⌘ is pressed. Shows a minimal icon indicator immediately,
+    /// then expands to the full panel on the first cursor move.
+    func startCommandKeyMode() {
+        searchViewModel.isCommandKeyMode = true
+        searchViewModel.isMinimalMode = true
+        searchViewModel.query = ""
+        isCommandKeyVisible = false
+
+        // Show the indicator right away at the current cursor position
+        searchViewModel.updateHoveredApp()
+        positionAtCursor()
+        orderFront(nil)
+
+        commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            guard let self else { return }
+            if !self.isCommandKeyVisible {
+                self.isCommandKeyVisible = true
+                self.searchViewModel.isMinimalMode = false
+            }
+            self.positionAtCursor()
+            self.searchViewModel.updateHoveredApp()
+        }
+    }
+
+    /// Called when ⌘ is released. Anchors the panel and shows the input row.
+    /// If the panel was never shown (cursor didn't move), discard silently.
+    func endCommandKeyMode() {
+        if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
+        if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
+        if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
+
+        guard isCommandKeyVisible else {
+            close()
+            return
+        }
+
+        // Show input row if it was hidden
+        if searchViewModel.isCommandKeyMode {
+            searchViewModel.isCommandKeyMode = false
+            makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        // Dismiss when cursor moves (unless ⌘ is held again or a message was sent)
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            guard let self, !self.isCommandKeyHeld, !self.searchViewModel.isChatMode else { return }
+            self.close()
+        }
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            guard let self, !self.isCommandKeyHeld, !self.searchViewModel.isChatMode else { return event }
+            self.close()
+            return event
+        }
+    }
+
+    /// Re-enter cursor-following on an already-visible panel.
+    /// Hides the input row only if no text has been typed yet.
+    func restartCommandKeyMode() {
+        if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
+        if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
+        if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
+
+        isCommandKeyVisible = true
+        if searchViewModel.query.isEmpty {
+            searchViewModel.isCommandKeyMode = true
+        }
+
+        // Global monitor fires when another app is frontmost; local monitor fires when we are.
+        commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            guard let self else { return }
+            self.positionAtCursor()
+            self.searchViewModel.updateHoveredApp()
+        }
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            guard let self else { return event }
+            self.positionAtCursor()
+            self.searchViewModel.updateHoveredApp()
+            return event
+        }
+    }
+
     private func removeAllMonitors() {
-        for monitor in [globalMouseMonitor, localMouseMonitor, globalClickMonitor].compactMap({ $0 }) {
+        for monitor in [globalMouseMonitor, localMouseMonitor, globalClickMonitor, commandKeyMouseMonitor].compactMap({ $0 }) {
             NSEvent.removeMonitor(monitor)
         }
         globalMouseMonitor = nil
         localMouseMonitor = nil
         globalClickMonitor = nil
+        commandKeyMouseMonitor = nil
     }
 
     override func close() {
@@ -163,10 +250,14 @@ class FloatingPanel: NSPanel {
         super.close()
         searchViewModel.query = ""
         searchViewModel.isChatMode = false
+        searchViewModel.isCommandKeyMode = false
+        searchViewModel.isMinimalMode = false
         searchViewModel.chatHistory = []
         searchViewModel.claudeManager = nil
         searchViewModel.currentSessionId = nil
         isTerminalMode = false
+        isCommandKeyVisible = false
+        isCommandKeyHeld = false
     }
 
     // Handle Escape: stop streaming if active, otherwise close
