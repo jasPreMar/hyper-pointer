@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.hyperpointer.app</string>
+    <key>CFBundleName</key>
+    <string>HyperPointer</string>
+    <key>CFBundleDisplayName</key>
+    <string>HyperPointer</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+
+    <!-- Automation (AppleScript/osascript) — shown when Claude controls another app -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>HyperPointer uses AppleScript to automate apps on your Mac when you ask it to perform tasks.</string>
+
+    <!-- System app data access -->
+    <key>NSRemindersUsageDescription</key>
+    <string>HyperPointer can read and create reminders when you ask it to manage your tasks.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>HyperPointer can read and create calendar events when you ask it to manage your schedule.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>HyperPointer can look up contacts when you ask it to help with people-related tasks.</string>
+
+    <!-- File system access -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>HyperPointer may access your Desktop folder to help with file management tasks.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>HyperPointer may access your Documents folder to help with file management tasks.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>HyperPointer may access your Downloads folder to help with file management tasks.</string>
+</dict>
+</plist>

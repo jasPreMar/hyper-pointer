@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ApplicationServices
 
 // Global reference for CGEventTap callback (C function pointers can't capture context)
 private weak var sharedAppDelegate: AppDelegate?
@@ -46,6 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
+        requestInitialPermissions()
         setupRightClickTap()
 
         // Global hotkey: Control + Space to create new panel
@@ -62,6 +64,68 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
             return event
+        }
+    }
+
+    // MARK: - Permission Setup
+
+    /// Pre-request all permissions HyperPointer needs so macOS dialogs appear upfront
+    /// rather than surprising the user mid-task when Claude runs a shell command.
+    private func requestInitialPermissions() {
+        // 1. Accessibility — required for the CGEventTap and Accessibility API.
+        //    If not yet granted, this prompts the user and opens System Settings.
+        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+
+        // 2. Screen Recording — required for window screenshots.
+        if !CGPreflightScreenCaptureAccess() {
+            CGRequestScreenCaptureAccess()
+        }
+
+        // 3. Apple Events (Automation) — required when Claude runs `osascript` to control
+        //    other apps. Pre-warm all foreground apps currently running, and observe any
+        //    app that launches later. TCC only shows a dialog once per app pair; after
+        //    Allow is clicked it's remembered forever.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.preWarmAllRunningApps()
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(appDidLaunch(_:)),
+            name: NSWorkspace.didLaunchApplicationNotification,
+            object: nil
+        )
+    }
+
+    private func preWarmAllRunningApps() {
+        for app in NSWorkspace.shared.runningApplications {
+            guard app.activationPolicy == .regular,
+                  let bundleID = app.bundleIdentifier,
+                  app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { continue }
+            preWarmAppleEventsPermission(for: bundleID)
+        }
+    }
+
+    @objc private func appDidLaunch(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.activationPolicy == .regular,
+              let bundleID = app.bundleIdentifier,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        preWarmAppleEventsPermission(for: bundleID)
+    }
+
+    /// Triggers the macOS Automation permission dialog for `bundleID` if not already granted.
+    /// Uses `AEDeterminePermissionToAutomateTarget` with `askUserIfNeeded: true`.
+    /// The target app does not need to be running — TCC grants permissions by bundle ID pair.
+    private func preWarmAppleEventsPermission(for bundleID: String) {
+        // typeApplicationBundleID = 'bund' (OSType 0x62756E64)
+        let bundDescType: OSType = 0x62756E64
+        bundleID.withCString { cStr in
+            var targetDesc = AEDesc()
+            guard AECreateDesc(bundDescType, cStr, bundleID.utf8.count, &targetDesc) == noErr else { return }
+            // typeWildCard = '****' — request permission for any event class/ID
+            AEDeterminePermissionToAutomateTarget(&targetDesc, OSType(0x2A2A2A2A), OSType(0x2A2A2A2A), true)
+            AEDisposeDesc(&targetDesc)
         }
     }
 

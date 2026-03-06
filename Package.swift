@@ -13,7 +13,18 @@ let package = Package(
             dependencies: [
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
             ],
-            path: "Sources"
+            path: "Sources",
+            exclude: ["Info.plist"],
+            // Embed Info.plist so macOS shows proper privacy descriptions in TCC dialogs.
+            // Run `swift build` from the package root so the relative path resolves correctly.
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/Info.plist",
+                ])
+            ]
         )
     ]
 )
