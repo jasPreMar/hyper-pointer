@@ -31,7 +31,7 @@ class FloatingPanel: NSPanel {
         )
 
         isFloatingPanel = true
-        level = .floating
+        level = .screenSaver
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
