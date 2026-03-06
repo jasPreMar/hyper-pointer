@@ -22,11 +22,19 @@ With AI, that limitation disappears. You're no longer choosing from a list. You 
 ```bash
 git clone https://github.com/jasPreMar/hyper-pointer.git
 cd hyper-pointer
-swift build
-./.build/arm64-apple-macosx/debug/HyperPointer
+make build
+./.build/debug/HyperPointer
 ```
 
-On first launch, macOS will prompt you to grant Accessibility permissions. Go to **System Settings → Privacy & Security → Accessibility** and enable HyperPointer.
+On first launch, macOS will prompt you to grant Accessibility and Screen Recording permissions. It will also show Automation permission dialogs for any apps currently running — click Allow for each. These are one-time prompts; macOS remembers your choices permanently.
+
+To skip all permission dialogs entirely, run once after building:
+
+```bash
+sudo make grant
+```
+
+This writes the grants directly to the TCC database so no popups ever appear.
 
 ## Usage
 
