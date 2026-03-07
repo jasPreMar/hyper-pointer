@@ -719,11 +719,33 @@ struct PanelContentView: View {
     @ObservedObject var viewModel: SearchViewModel
 
     var body: some View {
-        if viewModel.isChatMode {
-            ChatView(viewModel: viewModel)
-        } else {
-            SearchView(viewModel: viewModel)
+        Group {
+            if viewModel.isChatMode {
+                ChatView(viewModel: viewModel)
+            } else {
+                SearchView(viewModel: viewModel)
+            }
         }
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: PanelContentSizePreferenceKey.self,
+                    value: geometry.size
+                )
+            }
+        )
+        .onPreferenceChange(PanelContentSizePreferenceKey.self) { size in
+            guard size.width > 0, size.height > 0 else { return }
+            viewModel.onContentSizeChange?(size)
+        }
+    }
+}
+
+private struct PanelContentSizePreferenceKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
     }
 }
 
@@ -789,164 +811,142 @@ private struct AssistantMarkdown: View {
 
 struct ChatView: View {
     @ObservedObject var viewModel: SearchViewModel
+    @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 18
+    private let fixedChatHeight: CGFloat = 360
+
+    private var hasContextRow: Bool {
+        viewModel.hoveredParts.last != nil
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Draggable header with close button and status
-            HStack(spacing: 6) {
-                Button(action: { viewModel.onClose?() }) {
-                    Circle()
-                        .fill(Color(nsColor: .systemRed))
-                        .frame(width: 12, height: 12)
-                }
-                .buttonStyle(.plain)
+        PanelSurface(fixedHeight: fixedChatHeight) {
+            VStack(spacing: 0) {
+                if hasContextRow {
+                    PanelHeaderSection(
+                        viewModel: viewModel,
+                        showsCloseButtonOnHover: true,
+                        onClose: viewModel.onClose
+                    )
+                    .background(DragArea())
+                } else {
+                    if !viewModel.selectedText.isEmpty {
+                        PanelHeaderSection(viewModel: viewModel)
 
-                if let manager = viewModel.claudeManager {
-                    statusIndicator(for: manager)
-                    statusLabel(for: manager)
-                }
-
-                Spacer()
-
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(DragArea())
-
-            // Scrollable output
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(viewModel.chatHistory.enumerated()), id: \.offset) { _, entry in
-                            if entry.role == "user" {
-                                Text("> \(entry.text)")
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundColor(.secondary)
-                            } else {
-                                AssistantMarkdown(text: entry.text)
-                            }
-                        }
-
-                        if let manager = viewModel.claudeManager {
-                            EventsSummaryView(manager: manager)
-                        }
-
-                        if let manager = viewModel.claudeManager,
-                           !manager.diagnostics.isEmpty {
-                            DiagnosticsView(
-                                lines: manager.diagnostics,
-                                isLive: manager.status == .waiting || manager.status == .streaming
-                            )
-                        }
-
-                        if let manager = viewModel.claudeManager,
-                           manager.status == .waiting || manager.status == .streaming {
-                            StreamingTimerView()
-                        }
-
-                        if let manager = viewModel.claudeManager,
-                           !manager.outputText.isEmpty,
-                           manager.status == .done {
-                            AssistantMarkdown(text: manager.outputText)
-                        }
-
-                        Spacer().frame(height: 0).id("bottom")
+                        Divider()
+                            .padding(.horizontal, 8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    ChatCloseRow(viewModel: viewModel)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 7)
+                    .background(DragArea())
                 }
-                .onChange(of: viewModel.claudeManager?.outputText) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
+
+                Divider()
+                    .padding(.horizontal, 8)
+
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        HStack(alignment: .top, spacing: 0) {
+                            transcriptContent
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .onAppear {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
-                }
-                .onChange(of: viewModel.chatHistory.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
+                    .onChange(of: viewModel.claudeManager?.outputText) { _, _ in
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: viewModel.chatHistory.count) { _, _ in
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: viewModel.claudeManager?.status) { _, _ in
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
                     }
                 }
-                .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: viewModel.claudeManager?.status) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
-                    }
-                }
+
+                Divider()
+                    .padding(.horizontal, 8)
+
+                PanelInputRow(
+                    viewModel: viewModel,
+                    textWidth: $textWidth,
+                    textHeight: $textHeight,
+                    expandsTextField: true
+                )
             }
-
-            // Input field
-            HStack(alignment: .top, spacing: 4) {
-                Text(">")
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .padding(.top, 1)
-
-                FocusedTextField(text: $viewModel.query, textHeight: $textHeight, onSubmit: {
-                    viewModel.submitMessage()
-                })
-                .frame(height: textHeight)
-
-                if let manager = viewModel.claudeManager,
-                   manager.status == .waiting || manager.status == .streaming {
-                    Button(action: {
-                        manager.stop()
-                    }) {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 4)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 3)
-                    .help("Stop generation")
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-        }
-        .frame(width: 360, height: 320)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
-        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
-        )
-        .padding(16)
-    }
-
-    @ViewBuilder
-    private func statusIndicator(for manager: ClaudeProcessManager) -> some View {
-        switch manager.status {
-        case .waiting:
-            Circle().fill(.orange).frame(width: 6, height: 6)
-        case .streaming:
-            Circle().fill(.green).frame(width: 6, height: 6)
-        case .done:
-            Circle().fill(.blue).frame(width: 6, height: 6)
-        case .error:
-            Circle().fill(.red).frame(width: 6, height: 6)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
     }
 
-    @ViewBuilder
-    private func statusLabel(for manager: ClaudeProcessManager) -> some View {
-        switch manager.status {
-        case .waiting:
-            Text("Connecting...").font(.caption2).foregroundColor(.secondary)
-        case .streaming:
-            Text("Streaming...").font(.caption2).foregroundColor(.green)
-        case .done:
-            EmptyView()
-        case .error(let msg):
-            Text(msg).font(.caption2).foregroundColor(.red).lineLimit(1)
+    private var transcriptContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(viewModel.chatHistory.enumerated()), id: \.offset) { _, entry in
+                if entry.role == "user" {
+                    Text("> \(entry.text)")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.secondary)
+                } else {
+                    AssistantMarkdown(text: entry.text)
+                }
+            }
+
+            if let manager = viewModel.claudeManager {
+                EventsSummaryView(manager: manager)
+            }
+
+            if let manager = viewModel.claudeManager,
+               !manager.diagnostics.isEmpty {
+                DiagnosticsView(
+                    lines: manager.diagnostics,
+                    isLive: manager.status == .waiting || manager.status == .streaming
+                )
+            }
+
+            if let manager = viewModel.claudeManager,
+               manager.status == .waiting || manager.status == .streaming {
+                StreamingTimerView()
+            }
+
+            if let manager = viewModel.claudeManager,
+               !manager.outputText.isEmpty,
+               manager.status == .done {
+                AssistantMarkdown(text: manager.outputText)
+            }
+
+            Spacer().frame(height: 0).id("bottom")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct ChatCloseRow: View {
+    @ObservedObject var viewModel: SearchViewModel
+
+    var body: some View {
+        HStack {
+            Button(action: { viewModel.onClose?() }) {
+                Circle()
+                    .fill(Color(nsColor: .systemRed))
+                    .frame(width: 12, height: 12)
+            }
+            .buttonStyle(.plain)
+            Spacer()
         }
     }
 }
