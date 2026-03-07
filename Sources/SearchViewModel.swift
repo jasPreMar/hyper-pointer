@@ -15,6 +15,7 @@ class SearchViewModel: ObservableObject {
     @Published var chatHistory: [(role: String, text: String)] = []
     @Published var lastScreenshotStatus: String = ""
     var currentSessionId: String?
+    var onContentSizeChange: ((CGSize) -> Void)?
     private var hoveredAppPID: pid_t = 0
 
     /// Set by FloatingPanel

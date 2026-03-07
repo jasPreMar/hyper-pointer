@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 class FloatingPanel: NSPanel {
+    private static let maxPanelDimension: CGFloat = 392
     private struct FocusRestorationState {
         weak var app: NSRunningApplication?
         let bundleIdentifier: String?
@@ -9,7 +10,6 @@ class FloatingPanel: NSPanel {
         let focusedWindow: AXUIElement?
         let focusedElement: AXUIElement?
     }
-
     let searchViewModel = SearchViewModel()
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
@@ -18,6 +18,7 @@ class FloatingPanel: NSPanel {
     private var hostingView: NSHostingView<PanelContentView>!
     private var isTerminalMode = false
     private var isCommandKeyVisible = false
+    private var lastReportedContentSize: CGSize = .zero
     private var focusRestorationState: FocusRestorationState?
     private var shouldRestoreFocusOnClose = true
     var isCommandKeyHeld = false
@@ -50,6 +51,9 @@ class FloatingPanel: NSPanel {
         }
         searchViewModel.onClose = { [weak self] in
             self?.close()
+        }
+        searchViewModel.onContentSizeChange = { [weak self] size in
+            self?.resizeToContentSize(size, preserveTopEdge: true)
         }
     }
 
@@ -164,6 +168,35 @@ class FloatingPanel: NSPanel {
         }
     }
 
+    private func resizeToContentSize(_ size: CGSize, preserveTopEdge: Bool) {
+        let normalizedSize = CGSize(
+            width: min(ceil(size.width), Self.maxPanelDimension),
+            height: min(ceil(size.height), Self.maxPanelDimension)
+        )
+        guard normalizedSize.width > 0, normalizedSize.height > 0 else { return }
+        guard abs(normalizedSize.width - lastReportedContentSize.width) > 0.5 ||
+              abs(normalizedSize.height - lastReportedContentSize.height) > 0.5 else { return }
+        lastReportedContentSize = normalizedSize
+
+        guard isVisible else { return }
+
+        let previousTop = frame.maxY
+        let previousOriginX = frame.minX
+
+        setContentSize(normalizedSize)
+
+        guard preserveTopEdge else { return }
+
+        var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - frame.height)
+        if let screen = screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(frame) }) ?? NSScreen.main {
+            let visibleFrame = screen.visibleFrame
+            nextOrigin.x = max(visibleFrame.minX, min(nextOrigin.x, visibleFrame.maxX - frame.width))
+            nextOrigin.y = max(visibleFrame.minY, min(nextOrigin.y, visibleFrame.maxY - frame.height))
+        }
+
+        setFrameOrigin(nextOrigin)
+    }
+
     // MARK: - Command key mode
 
     /// Called when ⌘ is pressed. Shows a minimal icon indicator immediately,
@@ -273,6 +306,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.chatHistory = []
         searchViewModel.claudeManager = nil
         searchViewModel.currentSessionId = nil
+        lastReportedContentSize = .zero
         isTerminalMode = false
         isCommandKeyVisible = false
         isCommandKeyHeld = false

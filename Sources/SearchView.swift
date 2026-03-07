@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchView: View {
     @ObservedObject var viewModel: SearchViewModel
     @State private var textHeight: CGFloat = 18
+    @State private var textWidth: CGFloat = FocusedTextField.minWidth
 
     var body: some View {
         if viewModel.isMinimalMode {
@@ -37,8 +38,82 @@ struct SearchView: View {
     }
 
     private var fullPanel: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 0) {
+                PanelHeaderSection(viewModel: viewModel)
+
+                if viewModel.hasPanelHeaderContent && !viewModel.isCommandKeyMode {
+                    Divider()
+                        .padding(.horizontal, 8)
+                }
+
+                if !viewModel.isCommandKeyMode {
+                    PanelInputRow(
+                        viewModel: viewModel,
+                        textWidth: $textWidth,
+                        textHeight: $textHeight
+                    )
+                }
+            }
+        }
+    }
+}
+
+struct PanelSurface<Content: View>: View {
+    private let minWidth: CGFloat
+    private let maxWidth: CGFloat
+    private let fixedHeight: CGFloat?
+    private let content: Content
+
+    init(
+        minWidth: CGFloat = 188,
+        maxWidth: CGFloat = 360,
+        fixedHeight: CGFloat? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.minWidth = minWidth
+        self.maxWidth = maxWidth
+        self.fixedHeight = fixedHeight
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .frame(minWidth: minWidth, maxWidth: maxWidth, alignment: .leading)
+            .frame(height: fixedHeight, alignment: .top)
+            .fixedSize(horizontal: true, vertical: fixedHeight == nil)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
+            .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
+            )
+            .padding(16)
+    }
+}
+
+struct PanelHeaderSection<Accessory: View>: View {
+    @ObservedObject var viewModel: SearchViewModel
+    private let accessory: Accessory
+    private let showsCloseButtonOnHover: Bool
+    private let onClose: (() -> Void)?
+
+    init(
+        viewModel: SearchViewModel,
+        showsCloseButtonOnHover: Bool = false,
+        onClose: (() -> Void)? = nil,
+        @ViewBuilder accessory: () -> Accessory = { EmptyView() }
+    ) {
+        self.viewModel = viewModel
+        self.showsCloseButtonOnHover = showsCloseButtonOnHover
+        self.onClose = onClose
+        self.accessory = accessory()
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Selected/highlighted text
             if !viewModel.selectedText.isEmpty {
                 HStack(spacing: 7) {
                     Image(systemName: "text.quote")
@@ -56,58 +131,87 @@ struct SearchView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(Color.accentColor.opacity(0.08))
+            }
 
+            if !viewModel.selectedText.isEmpty, viewModel.hoveredParts.last != nil {
                 Divider()
                     .padding(.horizontal, 8)
             }
 
-            // Visible object row — show only the lowest level, with the top-level context as an icon.
             if let visiblePart = viewModel.hoveredParts.last {
-                MenuItemRow(
-                    text: visiblePart,
-                    appIcon: viewModel.hoveredContextIcon,
-                    contextText: viewModel.hoveredParts.first
-                )
+                HStack(spacing: 8) {
+                    ContextSummaryView(
+                        text: visiblePart,
+                        appIcon: viewModel.hoveredContextIcon,
+                        contextText: viewModel.hoveredParts.first,
+                        showsCloseButtonOnHover: showsCloseButtonOnHover,
+                        onClose: onClose
+                    )
 
-                Divider()
-                    .padding(.horizontal, 8)
-            }
-
-            // Command input at the bottom — hidden while ⌘ is held
-            if !viewModel.isCommandKeyMode {
-                HStack(alignment: .top, spacing: 4) {
-                    Text(">")
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .padding(.top, 1)
-
-                    FocusedTextField(text: $viewModel.query, textHeight: $textHeight, onSubmit: {
-                        viewModel.submitMessage()
-                    })
-                    .frame(height: textHeight)
+                    Spacer(minLength: 8)
+                    accessory
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
             }
         }
-        .frame(minWidth: 180, maxWidth: 360)
-        .fixedSize()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
-        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
-        )
-        .padding(16)
+    }
+}
+
+struct PanelInputRow: View {
+    @ObservedObject var viewModel: SearchViewModel
+    @Binding var textWidth: CGFloat
+    @Binding var textHeight: CGFloat
+    var expandsTextField = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 4) {
+            Text(">")
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundColor(.secondary)
+                .padding(.top, 1)
+
+            FocusedTextField(
+                text: $viewModel.query,
+                textWidth: $textWidth,
+                textHeight: $textHeight,
+                onSubmit: {
+                    viewModel.submitMessage()
+                }
+            )
+            .frame(width: expandsTextField ? nil : textWidth, height: textHeight)
+            .frame(maxWidth: expandsTextField ? .infinity : nil, alignment: .leading)
+
+            if let manager = viewModel.claudeManager,
+               manager.status == .waiting || manager.status == .streaming {
+                Button(action: {
+                    manager.stop()
+                }) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 3)
+                .help("Stop generation")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
     }
 }
 
 struct FocusedTextField: NSViewRepresentable {
     @Binding var text: String
+    @Binding var textWidth: CGFloat
     @Binding var textHeight: CGFloat
     var onSubmit: () -> Void
+    static let minWidth: CGFloat = 80
+    static let maxWidth: CGFloat = 292
     static let maxHeight: CGFloat = 120
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -150,17 +254,29 @@ struct FocusedTextField: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, textHeight: $textHeight, onSubmit: onSubmit)
+        Coordinator(
+            text: $text,
+            textWidth: $textWidth,
+            textHeight: $textHeight,
+            onSubmit: onSubmit
+        )
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
+        @Binding var textWidth: CGFloat
         @Binding var textHeight: CGFloat
         let onSubmit: () -> Void
         weak var textView: NSTextView?
 
-        init(text: Binding<String>, textHeight: Binding<CGFloat>, onSubmit: @escaping () -> Void) {
+        init(
+            text: Binding<String>,
+            textWidth: Binding<CGFloat>,
+            textHeight: Binding<CGFloat>,
+            onSubmit: @escaping () -> Void
+        ) {
             _text = text
+            _textWidth = textWidth
             _textHeight = textHeight
             self.onSubmit = onSubmit
         }
@@ -185,18 +301,31 @@ struct FocusedTextField: NSViewRepresentable {
                   let layoutManager = textView.layoutManager else { return }
             layoutManager.ensureLayout(for: container)
             let size = layoutManager.usedRect(for: container).size
+            let font = textView.font ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+            let longestLineWidth = textView.string
+                .components(separatedBy: .newlines)
+                .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+                .max() ?? 0
+            let newWidth = min(
+                max(longestLineWidth + 8, FocusedTextField.minWidth),
+                FocusedTextField.maxWidth
+            )
             let newHeight = min(max(size.height + 4, 18), FocusedTextField.maxHeight)
             DispatchQueue.main.async {
+                self.textWidth = newWidth
                 self.textHeight = newHeight
             }
         }
     }
 }
 
-struct MenuItemRow: View {
+struct ContextSummaryView: View {
     let text: String
     let appIcon: NSImage?
     let contextText: String?
+    let showsCloseButtonOnHover: Bool
+    let onClose: (() -> Void)?
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -209,14 +338,19 @@ struct MenuItemRow: View {
                 .truncationMode(.tail)
                 .foregroundColor(.primary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+        .onHover { isHovered = $0 }
     }
 
     @ViewBuilder
     private var leadingIcon: some View {
-        if let appIcon {
+        if showsCloseButtonOnHover, isHovered, let onClose {
+            Button(action: onClose) {
+                Circle()
+                    .fill(Color(nsColor: .systemRed))
+                    .frame(width: 12, height: 12)
+            }
+            .buttonStyle(.plain)
+        } else if let appIcon {
             Image(nsImage: appIcon)
                 .resizable()
                 .interpolation(.high)
@@ -279,5 +413,11 @@ struct MenuItemRow: View {
         if lower.contains("notification") { return "bell" }
 
         return "app"
+    }
+}
+
+private extension SearchViewModel {
+    var hasPanelHeaderContent: Bool {
+        !selectedText.isEmpty || hoveredParts.last != nil
     }
 }
