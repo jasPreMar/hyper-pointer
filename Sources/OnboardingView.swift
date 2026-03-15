@@ -413,9 +413,36 @@ private struct FinishStep: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Before you start")
+                    .font(.system(size: 14, weight: .semibold))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    testerNote("Every request uses your Claude Code plan. Normal usage is modest, but long sessions add up.")
+                    testerNote("Claude runs commands on your Mac without asking first. Be intentional about what you tell it to do.")
+                    testerNote("Screenshots of the window you point at are sent to Claude as context. Avoid hovering over sensitive info you wouldn't paste into a chat.")
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
             Spacer()
         }
         .padding(28)
+    }
+
+    private func testerNote(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\u{2022}")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func finishRow(_ title: String, ready: Bool) -> some View {
