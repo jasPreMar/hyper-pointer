@@ -809,27 +809,62 @@ private struct AssistantMarkdown: View {
 
 // MARK: - Chat View (output + input in the floating panel)
 
+private struct ScrollContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct ChatView: View {
     @ObservedObject var viewModel: SearchViewModel
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 18
-
-    private var hasContextRow: Bool {
-        viewModel.hoveredParts.last != nil
-    }
+    @State private var scrollContentHeight: CGFloat = 0
+    private let maxScrollAreaHeight: CGFloat = 500
 
     var body: some View {
         VStack(spacing: 0) {
-            if hasContextRow {
-                PanelHeaderSection(
-                    viewModel: viewModel,
-                    showsCloseButtonOnHover: false,
-                    onClose: viewModel.onClose
-                )
-            } else if !viewModel.selectedText.isEmpty {
-                PanelHeaderSection(viewModel: viewModel)
-                Divider()
-                    .padding(.horizontal, 8)
+            // Context info rendered inside the transparent title bar area.
+            // Left padding clears the traffic-light buttons (~76 pt).
+            HStack(spacing: 7) {
+                if let icon = viewModel.hoveredContextIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+                if let part = viewModel.hoveredParts.last {
+                    Text(contextDisplayText(part))
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 76)
+            .padding(.trailing, 12)
+            .frame(height: 28)
+
+            if !viewModel.selectedText.isEmpty {
+                HStack(spacing: 7) {
+                    Image(systemName: "text.quote")
+                        .font(.system(size: 11))
+                        .foregroundColor(.accentColor)
+                        .frame(width: 16, alignment: .center)
+                    Text(viewModel.selectedText)
+                        .font(.system(size: 12))
+                        .italic()
+                        .lineLimit(2)
+                        .foregroundColor(.primary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.08))
             }
 
             Divider()
@@ -841,8 +876,16 @@ struct ChatView: View {
                         transcriptContent
                         Spacer(minLength: 0)
                     }
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(key: ScrollContentHeightKey.self, value: geo.size.height)
+                        }
+                    )
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
+                .frame(height: min(max(scrollContentHeight + 16, 60), maxScrollAreaHeight))
+                .onPreferenceChange(ScrollContentHeightKey.self) { h in
+                    scrollContentHeight = h
+                }
                 .onAppear {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
@@ -878,7 +921,15 @@ struct ChatView: View {
                 expandsTextField: true
             )
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
+    }
+
+    private func contextDisplayText(_ text: String) -> String {
+        if let colonRange = text.range(of: ": ") {
+            return String(text[colonRange.upperBound...])
+        }
+        return text
     }
 
     private var transcriptContent: some View {

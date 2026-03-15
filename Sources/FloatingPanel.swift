@@ -202,7 +202,7 @@ class FloatingPanel: NSPanel {
         isOpaque = true
         backgroundColor = .windowBackgroundColor
         hasShadow = true
-        let chatSize = CGSize(width: 460, height: 520)
+        let chatSize = CGSize(width: 460, height: 200)
         setContentSize(chatSize)
         // Preserve position of the top-left corner, clamped to screen
         var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - frame.height)
@@ -257,7 +257,17 @@ class FloatingPanel: NSPanel {
     }
 
     private func resizeToContentSize(_ size: CGSize, preserveTopEdge: Bool) {
-        guard !isTerminalMode else { return }
+        if isTerminalMode {
+            // In terminal mode, grow the window to fit content (never shrink).
+            // The window is already user-resizable; we only auto-expand.
+            let maxHeight = (screen ?? NSScreen.main).map { $0.visibleFrame.height * 0.85 } ?? 700
+            let targetHeight = min(ceil(size.height), maxHeight)
+            guard targetHeight > frame.height + 0.5 else { return }
+            let newOriginY = frame.maxY - targetHeight
+            setFrame(NSRect(x: frame.minX, y: newOriginY, width: frame.width, height: targetHeight),
+                     display: true, animate: false)
+            return
+        }
         let normalizedSize = CGSize(
             width: min(ceil(size.width), Self.maxPanelDimension),
             height: min(ceil(size.height), Self.maxPanelDimension)
