@@ -76,6 +76,33 @@ class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    /// In chat mode, allow dragging the window from any non-interactive area
+    /// (header text, icons, transcript) without needing a dedicated drag view.
+    /// Interactive controls (close button, text input, scroll view) are passed
+    /// through normally so they keep working.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, isTerminalMode,
+           let contentView = contentView {
+            let point = contentView.convert(event.locationInWindow, from: nil)
+            if let hit = contentView.hitTest(point), !isInteractiveControl(hit) {
+                performDrag(with: event)
+                return
+            }
+        }
+        super.sendEvent(event)
+    }
+
+    private func isInteractiveControl(_ view: NSView) -> Bool {
+        var v: NSView? = view
+        while let current = v {
+            if current is NSControl || current is NSTextView || current is NSScrollView {
+                return true
+            }
+            v = current.superview
+        }
+        return false
+    }
+
     func show(at point: NSPoint) {
         searchViewModel.query = ""
         searchViewModel.updateHoveredApp()
