@@ -389,48 +389,48 @@ private struct FinishStep: View {
     @ObservedObject var viewModel: OnboardingViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Ready to test")
-                .font(.system(size: 30, weight: .semibold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Ready to test")
+                    .font(.system(size: 30, weight: .semibold))
 
-            Text("You can reopen this wizard any time from the HyperPointer menu bar item if you want to finish the optional voice permissions or preload more Automation targets.")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("You can reopen this wizard any time from the HyperPointer menu bar item if you want to finish the optional voice permissions or preload more Automation targets.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            VStack(alignment: .leading, spacing: 14) {
-                finishRow("Claude CLI", ready: viewModel.isClaudeInstalled)
-                finishRow("Accessibility", ready: viewModel.isAccessibilityGranted)
-                finishRow("Screen Recording", ready: viewModel.isScreenRecordingGranted)
-                finishRow("Voice input", ready: viewModel.microphoneStatus == .authorized && viewModel.speechStatus == .authorized)
-            }
-            .padding(20)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-
-            Text(viewModel.coreRequirementsReady ? "Core setup is complete. Launch a panel with Control-Space or Command-right-click and start testing." : "Core setup is still incomplete. You can finish anyway, but HyperPointer will be limited until Claude CLI, Accessibility, and Screen Recording are ready.")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Before you start")
-                    .font(.system(size: 14, weight: .semibold))
-
-                VStack(alignment: .leading, spacing: 6) {
-                    testerNote("Every request uses your Claude Code plan. Normal usage is modest, but long sessions add up.")
-                    testerNote("Claude runs commands on your Mac without asking first. Be intentional about what you tell it to do.")
-                    testerNote("Screenshots of the window you point at are sent to Claude as context. Avoid hovering over sensitive info you wouldn't paste into a chat.")
+                VStack(alignment: .leading, spacing: 14) {
+                    finishRow("Claude CLI", ready: viewModel.isClaudeInstalled)
+                    finishRow("Accessibility", ready: viewModel.isAccessibilityGranted)
+                    finishRow("Screen Recording", ready: viewModel.isScreenRecordingGranted)
+                    finishRow("Voice input", ready: viewModel.microphoneStatus == .authorized && viewModel.speechStatus == .authorized)
                 }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(20)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
 
-            Spacer()
+                Text(viewModel.coreRequirementsReady ? "Core setup is complete. Launch a panel with Control-Space or Command-right-click and start testing." : "Core setup is still incomplete. You can finish anyway, but HyperPointer will be limited until Claude CLI, Accessibility, and Screen Recording are ready.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Before you start")
+                        .font(.system(size: 14, weight: .semibold))
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        testerNote("Every request uses your Claude Code plan. Normal usage is modest, but long sessions add up.")
+                        testerNote("Claude runs commands on your Mac without asking first. Be intentional about what you tell it to do.")
+                        testerNote("Screenshots of the window you point at are sent to Claude as context. Avoid hovering over sensitive info you wouldn't paste into a chat.")
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .padding(28)
         }
-        .padding(28)
     }
 
     private func testerNote(_ text: String) -> some View {

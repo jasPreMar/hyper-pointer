@@ -113,9 +113,11 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     func requestAutomation(for app: AutomationApp) {
-        _ = automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.refreshAutomationApps()
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = self.automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.refreshAutomationApps()
+            }
         }
     }
 
