@@ -828,7 +828,6 @@ struct ChatView: View {
                         showsCloseButtonOnHover: true,
                         onClose: viewModel.onClose
                     )
-                    .overlay(DragArea())
                 } else {
                     if !viewModel.selectedText.isEmpty {
                         PanelHeaderSection(viewModel: viewModel)
@@ -840,7 +839,6 @@ struct ChatView: View {
                     ChatCloseRow(viewModel: viewModel)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
-                    .overlay(DragArea())
                 }
 
                 Divider()
@@ -951,43 +949,3 @@ private struct ChatCloseRow: View {
     }
 }
 
-// MARK: - Drag Area (makes the header draggable via native window drag)
-
-struct DragArea: NSViewRepresentable {
-    func makeNSView(context: Context) -> DragView {
-        let view = DragView()
-        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        view.setContentHuggingPriority(.defaultLow, for: .vertical)
-        return view
-    }
-    func updateNSView(_ nsView: DragView, context: Context) {}
-}
-
-class DragView: NSView {
-    override func mouseDown(with event: NSEvent) {
-        window?.performDrag(with: event)
-    }
-
-    /// Pass through clicks that land on an interactive control (e.g. the close button)
-    /// so those controls can still receive their events. Drags anywhere else in the
-    /// overlay initiate native window dragging via mouseDown.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        // `point` is in the superview's coordinate system.
-        guard let superview = superview else { return super.hitTest(point) }
-        for sibling in superview.subviews where sibling !== self {
-            if let hit = sibling.hitTest(point), hasInteractiveAncestor(hit, stopAt: superview) {
-                return nil
-            }
-        }
-        return super.hitTest(point)
-    }
-
-    private func hasInteractiveAncestor(_ view: NSView, stopAt limit: NSView) -> Bool {
-        var current: NSView? = view
-        while let v = current, v !== limit {
-            if v is NSControl || v is NSTextView { return true }
-            current = v.superview
-        }
-        return false
-    }
-}
