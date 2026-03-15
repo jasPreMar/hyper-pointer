@@ -235,7 +235,7 @@ class FloatingPanel: NSPanel {
     }
 
     private func positionAtCursor() {
-        guard !isTerminalMode, !searchViewModel.isVoiceModeActive else { return }
+        guard !isTerminalMode else { return }
         let fittingSize = hostingView.fittingSize
         setContentSize(fittingSize)
 
@@ -495,20 +495,6 @@ class FloatingPanel: NSPanel {
               isCursorFollowing,
               !searchViewModel.isVoiceModeActive else { return }
 
-        if let monitor = globalMouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalMouseMonitor = nil
-        }
-        if let monitor = localMouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMouseMonitor = nil
-        }
-        if let monitor = commandKeyMouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            commandKeyMouseMonitor = nil
-        }
-
-        isCursorFollowing = false
         searchViewModel.isCommandKeyMode = false
         searchViewModel.isMinimalMode = false
         voiceController.start()
