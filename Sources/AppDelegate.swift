@@ -306,13 +306,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Fetches the appcast in the background and shows the update badge if a newer version exists.
-    /// Repeats every hour so the badge appears without waiting for Sparkle's scheduled check.
+    /// Repeats every 10 minutes so the badge appears without waiting for Sparkle's scheduled check.
     private func checkForUpdateInBackground() {
         let check = { [weak self] in
             guard let feedURLString = Bundle.main.infoDictionary?["SUFeedURL"] as? String,
                   let feedURL = URL(string: feedURLString) else { return }
             let currentBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
-            URLSession.shared.dataTask(with: feedURL) { data, _, _ in
+            var request = URLRequest(url: feedURL)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            URLSession.shared.dataTask(with: request) { data, _, _ in
                 guard let data = data,
                       let xml = String(data: data, encoding: .utf8) else { return }
                 if let range = xml.range(of: "(?<=<sparkle:version>)\\d+(?=</sparkle:version>)", options: .regularExpression),
@@ -326,7 +328,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }.resume()
         }
         check()
-        updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { _ in check() }
+        updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in check() }
     }
 
     private func showUpdateBadge() {
