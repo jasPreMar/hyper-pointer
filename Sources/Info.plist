@@ -13,9 +13,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.28</string>
+	<string>1.0.30</string>
 	<key>CFBundleVersion</key>
-	<string>28</string>
+	<string>30</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
@@ -38,11 +38,11 @@
 	<string>HyperPointer converts your speech to text so you can dictate prompts hands-free.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
-	<key>SUScheduledCheckInterval</key>
-	<integer>600</integer>
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/jasPreMar/hyper-pointer/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>mQXgtNQZ6w86NlL8vf1PK9q2tvD2eO16PKh3Sxu3i2M=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>600</integer>
 </dict>
 </plist>
