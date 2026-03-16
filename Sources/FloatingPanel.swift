@@ -348,6 +348,10 @@ class FloatingPanel: NSPanel {
             nextOrigin.y = max(sf.minY, min(nextOrigin.y, sf.maxY - frame.height))
         }
         setFrameOrigin(nextOrigin)
+        // Re-establish key window status after the style mask change, which can
+        // silently drop it (non-activating panel → normal titled window).
+        makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
 
         // Switch to chat mode — the PanelContentView handles the rest
         searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query, events: []))
