@@ -167,8 +167,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let bundle = Bundle.main
         let shortVersion = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let buildNumber = bundle.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        let versionItem = NSMenuItem(title: "HyperPointer v\(shortVersion).\(buildNumber)", action: nil, keyEquivalent: "")
+        let versionItem = NSMenuItem(title: "HyperPointer v\(shortVersion)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
 
         let newPanelItem = NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n")
@@ -353,27 +352,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.show(at: point)
     }
 
+    /// Returns true if `remote` is a newer semantic version than `local` (e.g. "0.1.2" > "0.1.1").
+    private func isNewerVersion(_ remote: String, than local: String) -> Bool {
+        let r = remote.split(separator: ".").compactMap { Int($0) }
+        let l = local.split(separator: ".").compactMap { Int($0) }
+        for i in 0..<max(r.count, l.count) {
+            let rv = i < r.count ? r[i] : 0
+            let lv = i < l.count ? l[i] : 0
+            if rv > lv { return true }
+            if rv < lv { return false }
+        }
+        return false
+    }
+
     /// Fetches the appcast in the background and shows the update badge if a newer version exists.
     /// Repeats every 10 minutes so the badge appears without waiting for Sparkle's scheduled check.
     private func checkForUpdateInBackground() {
         let check = { [weak self] in
-            guard let feedURLString = Bundle.main.infoDictionary?["SUFeedURL"] as? String,
+            guard let self,
+                  let feedURLString = Bundle.main.infoDictionary?["SUFeedURL"] as? String,
                   var components = URLComponents(string: feedURLString) else { return }
             // Cache-bust to bypass GitHub CDN caching
             components.queryItems = [URLQueryItem(name: "t", value: "\(Int(Date().timeIntervalSince1970))")]
             guard let feedURL = components.url else { return }
-            let currentBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+            let localVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
             var request = URLRequest(url: feedURL)
             request.cachePolicy = .reloadIgnoringLocalCacheData
             URLSession.shared.dataTask(with: request) { data, _, _ in
                 guard let data = data,
                       let xml = String(data: data, encoding: .utf8) else { return }
-                if let range = xml.range(of: "(?<=<sparkle:version>)\\d+(?=</sparkle:version>)", options: .regularExpression),
-                   let remoteBuild = Int(xml[range]),
-                   let localBuild = Int(currentBuild),
-                   remoteBuild > localBuild {
-                    DispatchQueue.main.async {
-                        self?.showUpdateBadge()
+                if let range = xml.range(of: "(?<=<sparkle:version>)[\\d.]+(?=</sparkle:version>)", options: .regularExpression) {
+                    let remoteVersion = String(xml[range])
+                    if self.isNewerVersion(remoteVersion, than: localVersion) {
+                        DispatchQueue.main.async {
+                            self.showUpdateBadge(version: remoteVersion)
+                        }
                     }
                 }
             }.resume()
@@ -382,8 +395,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in check() }
     }
 
-    private func showUpdateBadge() {
-        checkForUpdatesItem?.title = "Update Available"
+    private func showUpdateBadge(version: String? = nil) {
+        if let version {
+            checkForUpdatesItem?.title = "Update to v\(version) Available"
+        } else {
+            checkForUpdatesItem?.title = "Update Available"
+        }
 
         guard let button = statusItem?.button, updateDot == nil else { return }
         let dotSize: CGFloat = 6
@@ -405,8 +422,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        let version = item.displayVersionString
         DispatchQueue.main.async { [weak self] in
-            self?.showUpdateBadge()
+            self?.showUpdateBadge(version: version)
         }
     }
 }
