@@ -5,34 +5,31 @@ class FloatingPanel: NSPanel {
     private static let maxPanelDimension: CGFloat = 392
     private struct MouseShakeDetector {
         private struct Segment {
-            let direction: CGFloat
-            let horizontalDistance: CGFloat
-            let verticalDistance: CGFloat
+            let vector: CGVector
+            let distance: CGFloat
             let timestamp: TimeInterval
         }
 
-        private static let resetInterval: TimeInterval = 0.18
-        private static let detectionWindow: TimeInterval = 0.55
-        private static let minimumHorizontalDelta: CGFloat = 6
-        private static let minimumSegmentDistance: CGFloat = 60
-        private static let minimumTotalTravel: CGFloat = 320
-        private static let minimumAverageHorizontalSpeed: CGFloat = 700
-        private static let maximumVerticalRatio: CGFloat = 0.6
+        private static let resetInterval: TimeInterval = 0.22
+        private static let detectionWindow: TimeInterval = 0.6
+        private static let minimumStepDistance: CGFloat = 6
+        private static let minimumSegmentDistance: CGFloat = 56
+        private static let minimumTotalTravel: CGFloat = 340
+        private static let minimumAverageSpeed: CGFloat = 850
+        private static let maximumReversalAlignment: CGFloat = -0.35
         private static let requiredSegments = 5
 
         private var lastPoint: NSPoint?
         private var lastTimestamp: TimeInterval?
-        private var activeDirection: CGFloat = 0
-        private var activeHorizontalDistance: CGFloat = 0
-        private var activeVerticalDistance: CGFloat = 0
+        private var activeVector: CGVector = .zero
+        private var activeDistance: CGFloat = 0
         private var segments: [Segment] = []
 
         mutating func reset() {
             lastPoint = nil
             lastTimestamp = nil
-            activeDirection = 0
-            activeHorizontalDistance = 0
-            activeVerticalDistance = 0
+            activeVector = .zero
+            activeDistance = 0
             segments.removeAll(keepingCapacity: true)
         }
 
@@ -55,31 +52,37 @@ class FloatingPanel: NSPanel {
 
             let deltaX = point.x - previousPoint.x
             let deltaY = point.y - previousPoint.y
-            let horizontalDistance = abs(deltaX)
-            guard horizontalDistance >= Self.minimumHorizontalDelta else {
+            let stepVector = CGVector(dx: deltaX, dy: deltaY)
+            let stepDistance = hypot(deltaX, deltaY)
+            guard stepDistance >= Self.minimumStepDistance else {
                 return false
             }
 
-            let direction: CGFloat = deltaX >= 0 ? 1 : -1
-            if activeDirection == 0 || direction == activeDirection {
-                activeDirection = direction
-                activeHorizontalDistance += horizontalDistance
-                activeVerticalDistance += abs(deltaY)
+            if activeDistance == 0 {
+                activeVector = stepVector
+                activeDistance = stepDistance
+                return false
+            }
+
+            let activeDirection = normalized(activeVector)
+            let projectedDistance = dot(stepVector, activeDirection)
+            if projectedDistance >= 0 {
+                activeVector.dx += stepVector.dx
+                activeVector.dy += stepVector.dy
+                activeDistance += stepDistance
                 return false
             }
 
             segments.append(
                 Segment(
-                    direction: activeDirection,
-                    horizontalDistance: activeHorizontalDistance,
-                    verticalDistance: activeVerticalDistance,
+                    vector: activeVector,
+                    distance: activeDistance,
                     timestamp: previousTimestamp
                 )
             )
 
-            activeDirection = direction
-            activeHorizontalDistance = horizontalDistance
-            activeVerticalDistance = abs(deltaY)
+            activeVector = stepVector
+            activeDistance = stepDistance
 
             trimSegments(after: timestamp)
             guard qualifiesForShake() else { return false }
@@ -98,19 +101,18 @@ class FloatingPanel: NSPanel {
         private func qualifiesForShake() -> Bool {
             guard segments.count == Self.requiredSegments else { return false }
 
-            var previousDirection: CGFloat?
-            var totalHorizontalDistance: CGFloat = 0
+            var previousDirection: CGVector?
+            var totalDistance: CGFloat = 0
 
             for segment in segments {
-                guard segment.horizontalDistance >= Self.minimumSegmentDistance else { return false }
-                guard segment.verticalDistance <= segment.horizontalDistance * Self.maximumVerticalRatio else {
+                guard segment.distance >= Self.minimumSegmentDistance else { return false }
+                let direction = normalized(segment.vector)
+                if let previousDirection,
+                   dot(previousDirection, direction) > Self.maximumReversalAlignment {
                     return false
                 }
-                if let previousDirection, previousDirection == segment.direction {
-                    return false
-                }
-                previousDirection = segment.direction
-                totalHorizontalDistance += segment.horizontalDistance
+                previousDirection = direction
+                totalDistance += segment.distance
             }
 
             guard let firstTimestamp = segments.first?.timestamp,
@@ -122,8 +124,18 @@ class FloatingPanel: NSPanel {
             let duration = lastTimestamp - firstTimestamp
             guard duration > 0 else { return false }
 
-            return totalHorizontalDistance >= Self.minimumTotalTravel &&
-                (totalHorizontalDistance / duration) >= Self.minimumAverageHorizontalSpeed
+            return totalDistance >= Self.minimumTotalTravel &&
+                (totalDistance / duration) >= Self.minimumAverageSpeed
+        }
+
+        private func normalized(_ vector: CGVector) -> CGVector {
+            let length = hypot(vector.dx, vector.dy)
+            guard length > 0 else { return .zero }
+            return CGVector(dx: vector.dx / length, dy: vector.dy / length)
+        }
+
+        private func dot(_ lhs: CGVector, _ rhs: CGVector) -> CGFloat {
+            lhs.dx * rhs.dx + lhs.dy * rhs.dy
         }
     }
 
