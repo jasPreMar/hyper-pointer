@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import ApplicationServices
 import Sparkle
+import WebKit
 
 // Global reference for CGEventTap callback (C function pointers can't capture context)
 private weak var sharedAppDelegate: AppDelegate?
@@ -61,6 +62,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var checkForUpdatesItem: NSMenuItem?
     private var updateDot: NSView?
     private var updateCheckTimer: Timer?
+    private var feedbackPopover: NSPopover?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
@@ -302,10 +304,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func openFeedbackPage() {
-        guard let url = URL(string: "https://prickly-perfume-f62.notion.site/5ca57834b3ec456eba024dc6ac60a337?pvs=105") else {
+        guard let url = URL(string: "https://prickly-perfume-f62.notion.site/ebd/5ca57834b3ec456eba024dc6ac60a337") else {
             return
         }
-        NSWorkspace.shared.open(url)
+        guard let button = statusItem?.button else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+
+        // Keep the menu action and shake gesture on the same feedback UI path.
+        if let existing = feedbackPopover, existing.isShown {
+            existing.performClose(nil)
+            return
+        }
+
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 580))
+        webView.load(URLRequest(url: url))
+
+        let viewController = NSViewController()
+        viewController.view = webView
+
+        let popover = NSPopover()
+        popover.contentSize = NSSize(width: 480, height: 580)
+        popover.contentViewController = viewController
+        popover.behavior = .transient
+        feedbackPopover = popover
+
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
     func createNewPanel() {
