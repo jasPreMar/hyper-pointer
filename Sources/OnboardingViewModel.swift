@@ -1,18 +1,7 @@
 import AppKit
-import ApplicationServices
 import AVFoundation
 import Carbon
 import Speech
-
-struct AutomationApp: Identifiable {
-    let name: String
-    let bundleIdentifier: String
-    let icon: NSImage?
-    let isGranted: Bool
-    let isRunning: Bool
-
-    var id: String { bundleIdentifier }
-}
 
 enum ClaudeSetupChoice {
     case thisMac
@@ -48,9 +37,6 @@ final class OnboardingViewModel: ObservableObject {
     @Published var isScreenRecordingGranted = false
     @Published var microphoneStatus: AVAuthorizationStatus = .notDetermined
     @Published var speechStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
-    @Published var automationApps: [AutomationApp] = []
-    @Published var automationSearchQuery = ""
-    @Published var isLoadingAutomationApps = false
     @Published var claudeSetupChoice: ClaudeSetupChoice = .thisMac
     @Published private(set) var isAccessibilityRequestInFlight = false
     @Published private(set) var isScreenRecordingRequestInFlight = false
@@ -62,7 +48,6 @@ final class OnboardingViewModel: ObservableObject {
     private let onAccessibilityStateChange: (Bool) -> Void
     private var permissionPollTimer: Timer?
     private var appObservers: [NSObjectProtocol] = []
-    private var workspaceObservers: [NSObjectProtocol] = []
     private var isRefreshingPermissionState = false
     private var appBundlePreparationProcess: Process?
 
@@ -80,7 +65,6 @@ final class OnboardingViewModel: ObservableObject {
     deinit {
         permissionPollTimer?.invalidate()
         appObservers.forEach { NotificationCenter.default.removeObserver($0) }
-        workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
     }
 
     var coreRequirementsReady: Bool {
@@ -99,24 +83,9 @@ final class OnboardingViewModel: ObservableObject {
         Bundle.main.bundleURL.pathExtension == "app"
     }
 
-    var hasAutomationTargets: Bool {
-        !automationApps.isEmpty
-    }
-
-    var filteredAutomationApps: [AutomationApp] {
-        let query = automationSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return automationApps }
-
-        return automationApps.filter { app in
-            app.name.localizedCaseInsensitiveContains(query) ||
-            app.bundleIdentifier.localizedCaseInsensitiveContains(query)
-        }
-    }
-
     func refresh() {
         refreshStaticState()
         refreshPermissionState()
-        refreshAutomationApps()
     }
 
     func finish() {
@@ -220,50 +189,6 @@ final class OnboardingViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self.isSpeechRecognitionRequestInFlight = false
                 self.refreshPermissionState()
-            }
-        }
-    }
-
-    func requestAutomation(for app: AutomationApp) {
-        NSApp.activate(ignoringOtherApps: true)
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let bundleID = app.bundleIdentifier
-
-            // AEDeterminePermissionToAutomateTarget only shows the macOS consent
-            // dialog when the target app is running. Check live state (not the
-            // potentially-stale isRunning flag) and launch if needed.
-            let isCurrentlyRunning = NSWorkspace.shared.runningApplications
-                .contains { $0.bundleIdentifier == bundleID }
-
-            if !isCurrentlyRunning {
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-                    let config = NSWorkspace.OpenConfiguration()
-                    config.activates = false
-                    config.hides = true
-                    let semaphore = DispatchSemaphore(value: 0)
-                    NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in
-                        semaphore.signal()
-                    }
-                    semaphore.wait()
-                    // Give the app time to finish launching so the AE subsystem can see it.
-                    Thread.sleep(forTimeInterval: 1.5)
-                }
-            }
-
-            // Bring ourselves back to front so the consent sheet is visible.
-            DispatchQueue.main.sync {
-                NSApp.activate(ignoringOtherApps: true)
-            }
-
-            let status = self.automationPermissionStatus(for: bundleID, askUserIfNeeded: true)
-
-            DispatchQueue.main.async {
-                if status == errAEEventNotPermitted {
-                    // Previously denied — macOS won't re-prompt; open Settings.
-                    self.openAutomationSettings()
-                }
-                self.refreshAutomationApps()
             }
         }
     }
@@ -383,42 +308,6 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
-    private func refreshAutomationApps() {
-        isLoadingAutomationApps = true
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let apps = self.discoverInstalledApps()
-
-            DispatchQueue.main.async {
-                self.automationApps = apps
-                self.isLoadingAutomationApps = false
-            }
-
-            // Check permissions in the background after the list is visible
-            self.resolvePermissionsInBackground(for: apps)
-        }
-    }
-
-    private func resolvePermissionsInBackground(for apps: [AutomationApp]) {
-        DispatchQueue.global(qos: .utility).async {
-            var updated: [AutomationApp] = []
-            for app in apps {
-                let granted = self.automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: false)
-                updated.append(AutomationApp(
-                    name: app.name,
-                    bundleIdentifier: app.bundleIdentifier,
-                    icon: app.icon,
-                    isGranted: granted,
-                    isRunning: app.isRunning
-                ))
-            }
-
-            DispatchQueue.main.async {
-                self.automationApps = updated
-            }
-        }
-    }
-
     private func startObservingSystemState() {
         let timer = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
             self?.refreshPermissionState()
@@ -438,97 +327,11 @@ final class OnboardingViewModel: ObservableObject {
             }
         ]
 
-        let workspaceCenter = NSWorkspace.shared.notificationCenter
-        workspaceObservers = [
-            workspaceCenter.addObserver(
-                forName: NSWorkspace.didLaunchApplicationNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                self?.refreshAutomationApps()
-            },
-            workspaceCenter.addObserver(
-                forName: NSWorkspace.didTerminateApplicationNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                self?.refreshAutomationApps()
-            }
-        ]
     }
 
     private func refreshStaticState() {
         update(\.invokeHotKey, to: InvokeHotKey.stored())
         update(\.isClaudeInstalled, to: resolveClaudeBinaryPath() != nil)
-    }
-
-    private func discoverInstalledApps() -> [AutomationApp] {
-        let fileManager = FileManager.default
-        let runningBundleIdentifiers = Set(
-            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
-        )
-        let runningBundleURLs = NSWorkspace.shared.runningApplications.compactMap(\.bundleURL)
-        let appRoots = [
-            URL(fileURLWithPath: "/Applications", isDirectory: true),
-            URL(fileURLWithPath: "/Applications/Utilities", isDirectory: true),
-            URL(fileURLWithPath: "/System/Applications", isDirectory: true),
-            URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true),
-            URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Applications", isDirectory: true)
-        ]
-
-        var results: [String: AutomationApp] = [:]
-        var visitedPaths = Set<String>()
-
-        for root in appRoots where fileManager.fileExists(atPath: root.path) {
-            guard let enumerator = fileManager.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .isApplicationKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else {
-                continue
-            }
-
-            for case let url as URL in enumerator {
-                guard url.pathExtension == "app" else { continue }
-                visitedPaths.insert(url.path)
-
-                if let app = automationApp(at: url, runningBundleIdentifiers: runningBundleIdentifiers) {
-                    results[app.bundleIdentifier] = app
-                }
-            }
-        }
-
-        for url in runningBundleURLs where !visitedPaths.contains(url.path) {
-            if let app = automationApp(at: url, runningBundleIdentifiers: runningBundleIdentifiers) {
-                results[app.bundleIdentifier] = app
-            }
-        }
-
-        return results.values.sorted { lhs, rhs in
-            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
-    }
-
-    private func automationApp(at url: URL, runningBundleIdentifiers: Set<String>) -> AutomationApp? {
-        guard let bundle = Bundle(url: url),
-              let bundleIdentifier = bundle.bundleIdentifier,
-              bundleIdentifier != Bundle.main.bundleIdentifier else {
-            return nil
-        }
-
-        let name = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ??
-            bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ??
-            url.deletingPathExtension().lastPathComponent
-
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
-
-        return AutomationApp(
-            name: name,
-            bundleIdentifier: bundleIdentifier,
-            icon: icon,
-            isGranted: false,
-            isRunning: runningBundleIdentifiers.contains(bundleIdentifier)
-        )
     }
 
     private func openSettings(anchor: String) {
@@ -538,34 +341,6 @@ final class OnboardingViewModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    /// Returns the raw `OSStatus` from `AEDeterminePermissionToAutomateTarget`.
-    /// `noErr` (0) means granted. Other common codes:
-    ///   -1743  errAEEventNotPermitted  – user previously denied
-    ///   -1744  errAEEventWouldRequireUserConsent – not yet decided (askUserIfNeeded was false)
-    ///   -600   procNotFound – target app is not running
-    private func automationPermissionStatus(for bundleIdentifier: String, askUserIfNeeded: Bool) -> OSStatus {
-        let bundDescType: OSType = 0x62756E64
-        return bundleIdentifier.withCString { cString in
-            var targetDesc = AEDesc()
-            guard AECreateDesc(bundDescType, cString, bundleIdentifier.utf8.count, &targetDesc) == noErr else {
-                return OSStatus(errAEEventNotPermitted)
-            }
-
-            defer { AEDisposeDesc(&targetDesc) }
-
-            let wildcard: OSType = 0x2A2A2A2A
-            return AEDeterminePermissionToAutomateTarget(
-                &targetDesc,
-                wildcard,
-                wildcard,
-                askUserIfNeeded
-            )
-        }
-    }
-
-    private func automationPermissionGranted(for bundleIdentifier: String, askUserIfNeeded: Bool) -> Bool {
-        automationPermissionStatus(for: bundleIdentifier, askUserIfNeeded: askUserIfNeeded) == noErr
-    }
 
     private static func restoredCurrentStep() -> Int {
         let storedStep = UserDefaults.standard.object(forKey: currentStepKey) as? Int ?? 0
