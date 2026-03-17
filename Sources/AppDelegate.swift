@@ -137,12 +137,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Main Menu (key equivalents for text editing)
 
-    /// Registers standard Edit menu key equivalents so that Cmd+A, Cmd+C, Cmd+V, etc.
-    /// are dispatched to the first responder (NSTextView) even though we have no visible menu bar.
+    /// Registers the standard macOS menu structure so window shortcuts continue
+    /// to flow through the responder chain when HyperPointer opens a normal app window.
     private func setupMainMenu() {
         let mainMenu = NSMenu()
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "HyperPointer"
 
-        let editMenuItem = NSMenuItem()
+        let appMenuItem = NSMenuItem(title: appName, action: nil, keyEquivalent: "")
+        mainMenu.addItem(appMenuItem)
+        let appMenu = NSMenu(title: appName)
+        appMenuItem.submenu = appMenu
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(handleStatusOpenSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+
+        appMenu.addItem(NSMenuItem(title: "Hide \(appName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+
+        appMenu.addItem(NSMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""))
+        appMenu.addItem(.separator())
+
+        let quitItem = NSMenuItem(title: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitItem.target = NSApp
+        appMenu.addItem(quitItem)
+
+        let fileMenuItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        mainMenu.addItem(fileMenuItem)
+        let fileMenu = NSMenu(title: "File")
+        fileMenuItem.submenu = fileMenu
+        fileMenu.addItem(NSMenuItem(title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+
+        let editMenuItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         mainMenu.addItem(editMenuItem)
         let editMenu = NSMenu(title: "Edit")
         editMenuItem.submenu = editMenu
@@ -155,7 +185,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
 
+        let viewMenuItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
+        mainMenu.addItem(viewMenuItem)
+        let viewMenu = NSMenu(title: "View")
+        viewMenuItem.submenu = viewMenu
+
+        let fullScreenItem = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullScreenItem.keyEquivalentModifierMask = [.command, .control]
+        viewMenu.addItem(fullScreenItem)
+
+        let windowMenuItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+        mainMenu.addItem(windowMenuItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenuItem.submenu = windowMenu
+        windowMenu.addItem(NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: ""))
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(NSMenuItem(title: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: ""))
+
         NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
     }
 
     private func setupStatusItem() {
@@ -252,6 +301,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showOnboarding(force: Bool = false) {
         if let onboardingWindow {
+            refreshApplicationPresentation()
             onboardingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -285,6 +335,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.delegate = self
 
         onboardingWindow = window
+        refreshApplicationPresentation()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -292,10 +343,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func closeOnboarding() {
         onboardingWindow?.orderOut(nil)
         onboardingWindow = nil
+        refreshApplicationPresentation()
     }
 
     private func showSettings() {
         if let settingsWindow {
+            refreshApplicationPresentation()
             settingsWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -308,20 +361,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = "HyperPointer Settings"
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
         window.center()
         window.contentView = NSHostingView(
             rootView: SettingsView(
                 onAccessibilityStateChange: { [weak self] isGranted in
                     self?.updateAccessibilityMonitoring(isGranted: isGranted)
+                },
+                onCheckForUpdates: { [weak self] in
+                    self?.checkForUpdates()
+                },
+                onLeaveFeedback: { [weak self] in
+                    self?.openFeedbackPage()
                 }
             )
         )
         window.delegate = self
 
         settingsWindow = window
+        refreshApplicationPresentation()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func refreshApplicationPresentation() {
+        let targetPolicy: NSApplication.ActivationPolicy = onboardingWindow != nil || settingsWindow != nil ? .regular : .accessory
+        if NSApp.activationPolicy() != targetPolicy {
+            NSApp.setActivationPolicy(targetPolicy)
+        }
     }
 
     private func updateAccessibilityMonitoring(isGranted: Bool) {
@@ -418,6 +486,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         feedbackPopover = popover
 
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    func checkForUpdates() {
+        updaterController?.checkForUpdates(nil)
     }
 
     func createNewPanel() {
@@ -526,6 +598,8 @@ extension AppDelegate: NSWindowDelegate {
         } else if window == settingsWindow {
             settingsWindow = nil
         }
+
+        refreshApplicationPresentation()
     }
 }
 
