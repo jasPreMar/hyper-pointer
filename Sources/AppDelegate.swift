@@ -89,7 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return event
         }
 
-        // Hold ⌘ to activate the panel and voice capture; release to anchor the panel for editing.
+        // Hold Fn to activate the panel and voice capture; release to anchor the panel for editing.
         flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(event)
         }
@@ -100,15 +100,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
-        let commandDown = event.modifierFlags.contains(.command)
-        if commandDown && !commandKeyHeld {
+        let fnDown = event.modifierFlags.contains(.function)
+        if fnDown && !commandKeyHeld {
             commandKeyHeld = true
-
-            // Don't enter command-key mode when the user is typing in a chat panel —
-            // let standard Cmd shortcuts (⌘A, ⌘C, ⌘Z, etc.) reach the text field.
-            if panels.first(where: { $0.isVisible && $0.searchViewModel.isChatMode && $0.isKeyWindow }) != nil {
-                return
-            }
 
             // Reuse an existing visible non-chat panel if one exists
             if let existing = panels.first(where: {
@@ -124,7 +118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 panels.append(panel)
                 panel.startCommandKeyMode()
             }
-        } else if !commandDown && commandKeyHeld {
+        } else if !fnDown && commandKeyHeld {
             commandKeyHeld = false
             if let panel = commandKeyPanel {
                 panel.isCommandKeyHeld = false
