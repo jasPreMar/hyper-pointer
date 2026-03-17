@@ -134,18 +134,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Main Menu (key equivalents for text editing)
+    // MARK: - Activation Policy
 
-    /// Registers standard Edit menu key equivalents so that Cmd+A, Cmd+C, Cmd+V, etc.
-    /// are dispatched to the first responder (NSTextView) even though we have no visible menu bar.
+    /// Switches to .regular (menu bar visible) when any chat window is open, otherwise .accessory.
+    func updateActivationPolicy() {
+        let hasChatWindows = panels.contains { $0.isVisible && $0.searchViewModel.isChatMode }
+        NSApp.setActivationPolicy(hasChatWindows ? .regular : .accessory)
+    }
+
+    // MARK: - Main Menu
+
+    /// Registers the app's main menu. This provides standard key equivalents for text editing
+    /// and displays in the Mac menu bar whenever the activation policy is .regular (i.e. a chat
+    /// window is open).
     private func setupMainMenu() {
         let mainMenu = NSMenu()
 
+        // App menu
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+        let appMenu = NSMenu()
+        appMenuItem.submenu = appMenu
+        let appName = Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "HyperPointer"
+        appMenu.addItem(NSMenuItem(title: "About \(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
+        appMenu.addItem(.separator())
+        let quitItem = NSMenuItem(title: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(quitItem)
+
+        // Edit menu
         let editMenuItem = NSMenuItem()
         mainMenu.addItem(editMenuItem)
         let editMenu = NSMenu(title: "Edit")
         editMenuItem.submenu = editMenu
-
         editMenu.addItem(NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"))
         editMenu.addItem(NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "Z"))
         editMenu.addItem(.separator())
@@ -153,6 +173,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
         editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+
+        // Window menu
+        let windowMenuItem = NSMenuItem()
+        mainMenu.addItem(windowMenuItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenuItem.submenu = windowMenu
+        windowMenu.addItem(NSMenuItem(title: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
     }
@@ -298,6 +327,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = FloatingPanel()
         panel.onFeedbackShake = { [weak self] in
             self?.openFeedbackPage()
+        }
+        panel.onChatWindowOpened = { [weak self] in
+            self?.updateActivationPolicy()
+        }
+        panel.onChatWindowClosed = { [weak self] in
+            self?.updateActivationPolicy()
         }
         return panel
     }
