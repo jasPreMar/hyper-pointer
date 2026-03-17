@@ -225,11 +225,19 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     func requestAutomation(for app: AutomationApp) {
+        NSApp.activate(ignoringOtherApps: true)
+
         DispatchQueue.global(qos: .userInitiated).async {
+            let bundleID = app.bundleIdentifier
+
             // AEDeterminePermissionToAutomateTarget only shows the macOS consent
-            // dialog when the target app is running. Launch it first if needed.
-            if !app.isRunning {
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleIdentifier) {
+            // dialog when the target app is running. Check live state (not the
+            // potentially-stale isRunning flag) and launch if needed.
+            let isCurrentlyRunning = NSWorkspace.shared.runningApplications
+                .contains { $0.bundleIdentifier == bundleID }
+
+            if !isCurrentlyRunning {
+                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
                     let config = NSWorkspace.OpenConfiguration()
                     config.activates = false
                     config.hides = true
@@ -238,12 +246,23 @@ final class OnboardingViewModel: ObservableObject {
                         semaphore.signal()
                     }
                     semaphore.wait()
-                    // Give the app time to finish launching so macOS recognises the process.
-                    Thread.sleep(forTimeInterval: 1.0)
+                    // Give the app time to finish launching so the AE subsystem can see it.
+                    Thread.sleep(forTimeInterval: 1.5)
                 }
             }
-            _ = self.automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+
+            // Bring ourselves back to front so the consent sheet is visible.
+            DispatchQueue.main.sync {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+
+            let status = self.automationPermissionStatus(for: bundleID, askUserIfNeeded: true)
+
+            DispatchQueue.main.async {
+                if status == errAEEventNotPermitted {
+                    // Previously denied — macOS won't re-prompt; open Settings.
+                    self.openAutomationSettings()
+                }
                 self.refreshAutomationApps()
             }
         }
@@ -519,26 +538,33 @@ final class OnboardingViewModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    private func automationPermissionGranted(for bundleIdentifier: String, askUserIfNeeded: Bool) -> Bool {
+    /// Returns the raw `OSStatus` from `AEDeterminePermissionToAutomateTarget`.
+    /// `noErr` (0) means granted. Other common codes:
+    ///   -1743  errAEEventNotPermitted  – user previously denied
+    ///   -1744  errAEEventWouldRequireUserConsent – not yet decided (askUserIfNeeded was false)
+    ///   -600   procNotFound – target app is not running
+    private func automationPermissionStatus(for bundleIdentifier: String, askUserIfNeeded: Bool) -> OSStatus {
         let bundDescType: OSType = 0x62756E64
         return bundleIdentifier.withCString { cString in
             var targetDesc = AEDesc()
             guard AECreateDesc(bundDescType, cString, bundleIdentifier.utf8.count, &targetDesc) == noErr else {
-                return false
+                return OSStatus(errAEEventNotPermitted)
             }
 
             defer { AEDisposeDesc(&targetDesc) }
 
             let wildcard: OSType = 0x2A2A2A2A
-            let status = AEDeterminePermissionToAutomateTarget(
+            return AEDeterminePermissionToAutomateTarget(
                 &targetDesc,
                 wildcard,
                 wildcard,
                 askUserIfNeeded
             )
-
-            return status == noErr
         }
+    }
+
+    private func automationPermissionGranted(for bundleIdentifier: String, askUserIfNeeded: Bool) -> Bool {
+        automationPermissionStatus(for: bundleIdentifier, askUserIfNeeded: askUserIfNeeded) == noErr
     }
 
     private static func restoredCurrentStep() -> Int {
