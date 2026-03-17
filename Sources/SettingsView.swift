@@ -46,8 +46,14 @@ struct SettingsView: View {
     @State private var selectedSection: SettingsSection? = .general
     @StateObject private var onboardingViewModel: OnboardingViewModel
     @StateObject private var settingsStore: AppSettingsStore
+    private let onCheckForUpdates: () -> Void
+    private let onLeaveFeedback: () -> Void
 
-    init(onAccessibilityStateChange: @escaping (Bool) -> Void) {
+    init(
+        onAccessibilityStateChange: @escaping (Bool) -> Void,
+        onCheckForUpdates: @escaping () -> Void,
+        onLeaveFeedback: @escaping () -> Void
+    ) {
         _onboardingViewModel = StateObject(
             wrappedValue: OnboardingViewModel(
                 onFinish: {},
@@ -55,16 +61,38 @@ struct SettingsView: View {
             )
         )
         _settingsStore = StateObject(wrappedValue: AppSettingsStore())
+        self.onCheckForUpdates = onCheckForUpdates
+        self.onLeaveFeedback = onLeaveFeedback
     }
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selectedSection) { section in
-                Label(section.title, systemImage: section.symbolName)
-                    .tag(section)
+            VStack(spacing: 0) {
+                List(SettingsSection.allCases, selection: $selectedSection) { section in
+                    Label(section.title, systemImage: section.symbolName)
+                        .tag(section)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .listStyle(.sidebar)
+
+                Divider()
+
+                VStack(spacing: 8) {
+                    SettingsSidebarActionButton(
+                        title: "Check for Updates",
+                        symbolName: "arrow.down.circle",
+                        action: onCheckForUpdates
+                    )
+
+                    SettingsSidebarActionButton(
+                        title: "Leave Feedback",
+                        symbolName: "bubble.left.and.bubble.right",
+                        action: onLeaveFeedback
+                    )
+                }
+                .padding(12)
             }
             .navigationSplitViewColumnWidth(min: 190, ideal: 210)
-            .listStyle(.sidebar)
         } detail: {
             Group {
                 switch selectedSection ?? .general {
@@ -82,6 +110,36 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))
         }
+    }
+}
+
+private struct SettingsSidebarActionButton: View {
+    let title: String
+    let symbolName: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 16)
+
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
