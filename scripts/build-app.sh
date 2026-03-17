@@ -94,6 +94,11 @@ cp "$BINARY_PATH" "$MACOS_PATH/$APP_NAME"
 cp "$ROOT_DIR/Sources/Info.plist" "$CONTENTS_PATH/Info.plist"
 cp "$ROOT_DIR/Sources/Resources"/*.wav "$RESOURCES_PATH/"
 
+RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 1 -name "${APP_NAME}_*.bundle" -type d 2>/dev/null | head -1)"
+if [[ -n "$RESOURCE_BUNDLE" ]]; then
+  cp -R "$RESOURCE_BUNDLE" "$RESOURCES_PATH/"
+fi
+
 # Embed Sparkle.framework (extracted by SPM into .build/artifacts/)
 SPARKLE_FRAMEWORK="$(find "$ROOT_DIR/.build/artifacts" -name "Sparkle.framework" -type d 2>/dev/null | head -1)"
 if [[ -n "$SPARKLE_FRAMEWORK" ]]; then

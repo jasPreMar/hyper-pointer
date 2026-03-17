@@ -2,6 +2,7 @@ import AppKit
 
 /// Preloads PTT chime sounds into memory so playback is instantaneous.
 class PTTSoundPlayer {
+    private static let resourceBundleName = "HyperPointer_HyperPointer"
     private let pressSound: NSSound?
     private let releaseSound: NSSound?
 
@@ -23,9 +24,39 @@ class PTTSoundPlayer {
     }
 
     private static func loadSound(named name: String) -> NSSound? {
-        if let url = Bundle.module.url(forResource: name, withExtension: "wav") {
-            return NSSound(contentsOf: url, byReference: false)
+        for url in resourceCandidateURLs(for: name, ext: "wav") {
+            if let sound = NSSound(contentsOf: url, byReference: false) {
+                return sound
+            }
         }
         return nil
+    }
+
+    private static func resourceCandidateURLs(for name: String, ext: String) -> [URL] {
+        var candidates: [URL] = []
+
+        if let mainResourceURL = Bundle.main.resourceURL {
+            candidates.append(mainResourceURL.appendingPathComponent("\(name).\(ext)"))
+            candidates.append(
+                mainResourceURL
+                    .appendingPathComponent("\(resourceBundleName).bundle")
+                    .appendingPathComponent("\(name).\(ext)")
+            )
+        }
+
+        if let executableURL = Bundle.main.executableURL?.deletingLastPathComponent() {
+            candidates.append(
+                executableURL
+                    .appendingPathComponent("\(resourceBundleName).bundle")
+                    .appendingPathComponent("\(name).\(ext)")
+            )
+        }
+
+        var seen = Set<String>()
+        return candidates.filter { url in
+            let path = url.standardizedFileURL.path
+            guard seen.insert(path).inserted else { return false }
+            return FileManager.default.fileExists(atPath: path)
+        }
     }
 }
