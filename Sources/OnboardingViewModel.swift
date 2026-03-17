@@ -226,6 +226,22 @@ final class OnboardingViewModel: ObservableObject {
 
     func requestAutomation(for app: AutomationApp) {
         DispatchQueue.global(qos: .userInitiated).async {
+            // AEDeterminePermissionToAutomateTarget only shows the macOS consent
+            // dialog when the target app is running. Launch it first if needed.
+            if !app.isRunning {
+                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleIdentifier) {
+                    let config = NSWorkspace.OpenConfiguration()
+                    config.activates = false
+                    config.hides = true
+                    let semaphore = DispatchSemaphore(value: 0)
+                    NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in
+                        semaphore.signal()
+                    }
+                    semaphore.wait()
+                    // Give the app time to finish launching so macOS recognises the process.
+                    Thread.sleep(forTimeInterval: 1.0)
+                }
+            }
             _ = self.automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 self.refreshAutomationApps()

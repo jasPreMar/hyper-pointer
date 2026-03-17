@@ -156,6 +156,7 @@ private struct ClaudeSetupStep: View {
 
 private struct PermissionsStep: View {
     @ObservedObject var viewModel: OnboardingViewModel
+    @State private var isAutomationExpanded = false
 
     var body: some View {
         OnboardingPageScaffold(
@@ -164,16 +165,6 @@ private struct PermissionsStep: View {
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 0) {
-                PermissionStatusRow(
-                    title: "Automation (AppleScript)",
-                    description: "Approve per-app later when HyperPointer asks to control another app.",
-                    icon: "bolt.horizontal.circle",
-                    state: .informational("Later")
-                )
-
-                Divider()
-                    .padding(.leading, 64)
-
                 PermissionStatusRow(
                     title: "Accessibility",
                     description: "Control UI elements and inspect what is under your pointer.",
@@ -238,9 +229,131 @@ private struct PermissionsStep: View {
                         }
                     }
                 )
+
+                Divider()
+                    .padding(.leading, 64)
+
+                // Expandable Automation section
+                automationHeader
+
+                if isAutomationExpanded {
+                    Divider()
+                        .padding(.leading, 64)
+
+                    automationAppList
+                }
                 }
                 .cardStyle()
             }
+        }
+    }
+
+    private var automationHeader: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isAutomationExpanded.toggle()
+            }
+        } label: {
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.secondary.opacity(0.12))
+                        .frame(width: 36, height: 36)
+
+                    Image(systemName: "bolt.horizontal.circle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Automation (AppleScript)")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Grant per-app permission to control other apps.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                automationSummary
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isAutomationExpanded ? 90 : 0))
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onboardingClickableCursor()
+    }
+
+    @ViewBuilder
+    private var automationSummary: some View {
+        let grantedCount = viewModel.automationApps.filter(\.isGranted).count
+        let totalCount = viewModel.automationApps.count
+        if totalCount > 0 {
+            Text("\(grantedCount)/\(totalCount)")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var automationAppList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if viewModel.isLoadingAutomationApps && viewModel.automationApps.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .controlSize(.small)
+                    Spacer()
+                }
+                .padding(.vertical, 12)
+            } else if viewModel.automationApps.isEmpty {
+                Text("No applications found.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+            } else {
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(viewModel.automationApps) { app in
+                            AutomationAppRow(app: app) {
+                                viewModel.requestAutomation(for: app)
+                            }
+
+                            if app.id != viewModel.automationApps.last?.id {
+                                Divider()
+                                    .padding(.leading, 78)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 200)
+            }
+
+            Divider()
+                .padding(.leading, 64)
+
+            Button {
+                viewModel.openAutomationSettings()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "gear")
+                        .font(.system(size: 12))
+                    Text("Open System Settings")
+                        .font(.system(size: 12.5, weight: .medium))
+                }
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .onboardingClickableCursor()
         }
     }
 
@@ -256,6 +369,45 @@ private struct PermissionsStep: View {
             return .inProgress
         }
         return .action("Grant", action)
+    }
+}
+
+private struct AutomationAppRow: View {
+    let app: AutomationApp
+    let onGrant: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if let icon = app.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(width: 28, height: 28)
+            }
+
+            Text(app.name)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            if app.isGranted {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.green)
+                    .font(.system(size: 14))
+            } else {
+                Button("Grant", action: onGrant)
+                    .buttonStyle(PermissionGrantButtonStyle())
+                    .onboardingClickableCursor()
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
     }
 }
 
