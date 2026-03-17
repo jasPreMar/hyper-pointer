@@ -157,17 +157,50 @@ class FloatingPanel: NSPanel {
     private var isTerminalMode = false
     private var isCommandKeyVisible = false
     private var isCursorFollowing = false
+    private var isDestroyingTaskWindow = false
     private var currentModifierFlags: NSEvent.ModifierFlags = []
     private var lastReportedContentSize: CGSize = .zero
     private var focusRestorationState: FocusRestorationState?
     private var shouldRestoreFocusOnClose = true
     private let voiceController = VoiceDictationController()
     private var mouseShakeDetector = MouseShakeDetector()
+    private(set) var taskStartedAt: Date?
+    private(set) var taskCompletedAt: Date?
+    private(set) var taskLastActivityAt: Date?
+    private(set) var preservesTaskHistory = false
     var isCommandKeyHeld = false
     var onCommandKeyDropped: (() -> Void)?
     var onFeedbackShake: (() -> Void)?
     var onMessageSent: (() -> Void)?
     var onStreamingComplete: (() -> Void)?
+    var onPersistentTaskStarted: ((FloatingPanel) -> Void)?
+    var onTaskStateChanged: ((FloatingPanel) -> Void)?
+    var onPanelDestroyed: ((FloatingPanel) -> Void)?
+
+    var taskDisplayTitle: String {
+        let fallback = searchViewModel.query.isEmpty ? "New task" : searchViewModel.query
+        return Self.normalizedContextText(searchViewModel.hoveredParts.last) ?? fallback
+    }
+
+    var taskDisplaySubtitle: String {
+        guard let firstPart = searchViewModel.hoveredParts.first else { return "" }
+        let subtitle = Self.normalizedContextText(firstPart) ?? ""
+        return subtitle == taskDisplayTitle ? "" : subtitle
+    }
+
+    var taskDisplayIcon: NSImage? {
+        searchViewModel.hoveredContextIcon
+    }
+
+    var isTaskRunning: Bool {
+        guard let manager = searchViewModel.claudeManager else { return false }
+        switch manager.status {
+        case .waiting, .streaming:
+            return true
+        case .done, .error:
+            return false
+        }
+    }
 
     init() {
         super.init(
@@ -195,10 +228,15 @@ class FloatingPanel: NSPanel {
             )
         }
         searchViewModel.onMessageSent = { [weak self] in
+            self?.markTaskActivity()
             self?.onMessageSent?()
         }
         searchViewModel.onStreamingComplete = { [weak self] in
+            self?.markTaskActivity(completed: true)
             self?.onStreamingComplete?()
+        }
+        searchViewModel.onClaudeManagerChange = { [weak self] manager in
+            self?.configureClaudeManager(manager)
         }
         searchViewModel.onClose = { [weak self] in
             self?.close()
@@ -221,6 +259,14 @@ class FloatingPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    private static func normalizedContextText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        if let colonRange = text.range(of: ": ") {
+            return String(text[colonRange.upperBound...])
+        }
+        return text
+    }
 
     /// In chat mode, make the entire window draggable except the text input and
     /// scroll area. Always dispatch mouseDown normally so buttons (like the close
@@ -331,11 +377,13 @@ class FloatingPanel: NSPanel {
 
     func transitionToTerminal(
         message: String,
-        screenshotURL: URL? = nil
+        screenshotURL: URL? = nil,
+        centerWindow: Bool = false
     ) {
         isTerminalMode = true
         isCursorFollowing = false
         removeAllMonitors()
+        beginPersistentTaskIfNeeded()
 
         // Convert to a normal titled window so it behaves like any other window:
         // standard z-ordering (click to front, other windows can go in front),
@@ -351,18 +399,16 @@ class FloatingPanel: NSPanel {
         hasShadow = true
         let chatSize = CGSize(width: 460, height: 200)
         setContentSize(chatSize)
-        // Preserve position of the top-left corner, clamped to screen
-        var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - frame.height)
-        if let scr = screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(frame) }) ?? NSScreen.main {
-            let sf = scr.visibleFrame
-            nextOrigin.x = max(sf.minX, min(nextOrigin.x, sf.maxX - frame.width))
-            nextOrigin.y = max(sf.minY, min(nextOrigin.y, sf.maxY - frame.height))
-        }
-        setFrameOrigin(nextOrigin)
+        positionTaskWindow(
+            previousOriginX: previousOriginX,
+            previousTop: previousTop,
+            centerWindow: centerWindow
+        )
         // Re-establish key window status after the style mask change, which can
         // silently drop it (non-activating panel → normal titled window).
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        notifyTaskStateChanged()
 
         // Switch to chat mode — the PanelContentView handles the rest
         searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query, events: []))
@@ -387,6 +433,108 @@ class FloatingPanel: NSPanel {
             message: message,
             screenshotURL: screenshotURL
         )
+    }
+
+    func startTaskFromMenu(query: String) {
+        searchViewModel.configureHomeFolderContext()
+        searchViewModel.query = query
+        let message = searchViewModel.buildContextMessage()
+        let (screenshotURL, _) = searchViewModel.captureFullScreenScreenshot()
+        transitionToTerminal(
+            message: message,
+            screenshotURL: screenshotURL,
+            centerWindow: true
+        )
+    }
+
+    func reopenPersistentTaskWindow() {
+        guard preservesTaskHistory else { return }
+        prepareForTextInputFocus()
+        makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        notifyTaskStateChanged()
+    }
+
+    func destroyPersistentTaskWindow() {
+        isDestroyingTaskWindow = true
+        close()
+    }
+
+    private func positionTaskWindow(
+        previousOriginX: CGFloat,
+        previousTop: CGFloat,
+        centerWindow: Bool
+    ) {
+        if centerWindow {
+            let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? screen ?? NSScreen.main
+            let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+            let origin = NSPoint(
+                x: visibleFrame.midX - frame.width / 2,
+                y: visibleFrame.midY - frame.height / 2
+            )
+            setFrameOrigin(origin)
+            return
+        }
+
+        // Preserve position of the top-left corner, clamped to screen.
+        var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - frame.height)
+        if let scr = screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(frame) }) ?? NSScreen.main {
+            let sf = scr.visibleFrame
+            nextOrigin.x = max(sf.minX, min(nextOrigin.x, sf.maxX - frame.width))
+            nextOrigin.y = max(sf.minY, min(nextOrigin.y, sf.maxY - frame.height))
+        }
+        setFrameOrigin(nextOrigin)
+    }
+
+    private func beginPersistentTaskIfNeeded() {
+        let now = Date()
+
+        if !preservesTaskHistory {
+            preservesTaskHistory = true
+            taskStartedAt = now
+            onPersistentTaskStarted?(self)
+        }
+
+        taskCompletedAt = nil
+        taskLastActivityAt = now
+        notifyTaskStateChanged()
+    }
+
+    private func markTaskActivity(completed: Bool = false) {
+        guard preservesTaskHistory else { return }
+
+        let now = Date()
+        taskLastActivityAt = now
+        taskCompletedAt = completed ? now : nil
+        notifyTaskStateChanged()
+    }
+
+    private func configureClaudeManager(_ manager: ClaudeProcessManager?) {
+        manager?.onStatusChange = { [weak self] status in
+            DispatchQueue.main.async {
+                self?.handleManagerStatusChange(status)
+            }
+        }
+    }
+
+    private func handleManagerStatusChange(_ status: StreamStatus) {
+        guard preservesTaskHistory else { return }
+
+        switch status {
+        case .waiting, .streaming:
+            taskCompletedAt = nil
+            taskLastActivityAt = Date()
+        case .done, .error:
+            let now = Date()
+            taskCompletedAt = now
+            taskLastActivityAt = now
+        }
+
+        notifyTaskStateChanged()
+    }
+
+    private func notifyTaskStateChanged() {
+        onTaskStateChanged?(self)
     }
 
     private func positionAtCursor() {
@@ -592,10 +740,16 @@ class FloatingPanel: NSPanel {
     }
 
     override func close() {
+        if preservesTaskHistory && isTerminalMode && !isDestroyingTaskWindow {
+            hidePersistentTaskWindow(restorePreviousFocus: shouldRestoreFocusOnClose)
+            return
+        }
+
         let shouldRestoreFocus = shouldRestoreFocusOnClose
         let restorationState = focusRestorationState
         shouldRestoreFocusOnClose = true
         focusRestorationState = nil
+        isDestroyingTaskWindow = false
 
         removeAllMonitors()
         voiceController.cancel()
@@ -623,10 +777,16 @@ class FloatingPanel: NSPanel {
         isCursorFollowing = false
         currentModifierFlags = []
         isCommandKeyHeld = false
+        preservesTaskHistory = false
+        taskStartedAt = nil
+        taskCompletedAt = nil
+        taskLastActivityAt = nil
 
         if shouldRestoreFocus {
             restoreFocus(using: restorationState)
         }
+
+        onPanelDestroyed?(self)
     }
 
     // Handle Escape: stop streaming if active, otherwise close
@@ -642,6 +802,25 @@ class FloatingPanel: NSPanel {
     func dismiss(restorePreviousFocus: Bool = true) {
         shouldRestoreFocusOnClose = restorePreviousFocus
         close()
+    }
+
+    private func hidePersistentTaskWindow(restorePreviousFocus: Bool) {
+        let restorationState = focusRestorationState
+        focusRestorationState = nil
+        shouldRestoreFocusOnClose = true
+
+        removeAllMonitors()
+        voiceController.cancel()
+        orderOut(nil)
+        isCommandKeyVisible = false
+        isCursorFollowing = false
+        currentModifierFlags = []
+        isCommandKeyHeld = false
+        notifyTaskStateChanged()
+
+        if restorePreviousFocus {
+            restoreFocus(using: restorationState)
+        }
     }
 
     func updateModifierFlags(_ modifierFlags: NSEvent.ModifierFlags) {

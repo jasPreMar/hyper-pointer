@@ -18,12 +18,17 @@ class SearchViewModel: ObservableObject {
     @Published var isChatMode = false
     @Published var isCommandKeyMode = false
     @Published var isMinimalMode = false
-    @Published var claudeManager: ClaudeProcessManager?
+    @Published var claudeManager: ClaudeProcessManager? {
+        didSet {
+            onClaudeManagerChange?(claudeManager)
+        }
+    }
     @Published var chatHistory: [(role: String, text: String, events: [StreamEvent])] = []
     @Published var voiceState: VoiceState = .idle
     @Published var voiceLevel: CGFloat = 0
     var currentSessionId: String?
     var onContentSizeChange: ((CGSize) -> Void)?
+    var onClaudeManagerChange: ((ClaudeProcessManager?) -> Void)?
     private var hoveredAppPID: pid_t = 0
 
     // Stale accessibility tree detection
@@ -118,6 +123,25 @@ class SearchViewModel: ObservableObject {
     }
 
     func captureHoveredWindowScreenshot() -> (URL?, String) {
+        captureScreenshot(for: hoveredAppPID)
+    }
+
+    func captureFullScreenScreenshot() -> (URL?, String) {
+        captureScreenshot(for: 0)
+    }
+
+    func configureHomeFolderContext() {
+        let homeURL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let homeName = FileManager.default.displayName(atPath: homeURL.path)
+
+        hoveredApp = homeName
+        hoveredParts = [homeName]
+        hoveredContextIcon = NSWorkspace.shared.icon(forFile: homeURL.path)
+        selectedText = ""
+        hoveredAppPID = 0
+    }
+
+    private func captureScreenshot(for targetPID: pid_t) -> (URL?, String) {
         guard CGPreflightScreenCaptureAccess() else {
             CGRequestScreenCaptureAccess()
             return (nil, "Screenshot not captured: screen recording permission not granted")
@@ -125,7 +149,7 @@ class SearchViewModel: ObservableObject {
 
         let cgImage: CGImage?
 
-        if hoveredAppPID == 0 {
+        if targetPID == 0 {
             // No hovered element — capture the entire screen
             cgImage = CGWindowListCreateImage(.infinite, .optionOnScreenOnly, kCGNullWindowID, [])
         } else {
@@ -136,7 +160,7 @@ class SearchViewModel: ObservableObject {
             }
 
             let appWindows = windowList.filter {
-                ($0[kCGWindowOwnerPID as String] as? pid_t) == hoveredAppPID
+                ($0[kCGWindowOwnerPID as String] as? pid_t) == targetPID
             }
 
             let sortedWindows = appWindows.sorted {
@@ -154,7 +178,7 @@ class SearchViewModel: ObservableObject {
                 CGRectMakeWithDictionaryRepresentation(boundsDict as CFDictionary, &windowRect)
             }
 
-            let isBrowser = NSRunningApplication(processIdentifier: hoveredAppPID)
+            let isBrowser = NSRunningApplication(processIdentifier: targetPID)
                 .flatMap { $0.bundleIdentifier }
                 .map { browserBundleIDs.contains($0) } ?? false
 
