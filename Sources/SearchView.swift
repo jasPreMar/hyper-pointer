@@ -219,7 +219,7 @@ struct PanelInputRow: View {
             .frame(maxWidth: expandsTextField ? .infinity : nil, alignment: .leading)
 
             if let manager = viewModel.claudeManager,
-               manager.status == .waiting || manager.status == .streaming {
+               manager.status == .streaming {
                 Button(action: {
                     manager.stop()
                 }) {
