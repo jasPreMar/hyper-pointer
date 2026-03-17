@@ -34,6 +34,8 @@ class ClaudeProcessManager: ObservableObject {
     @Published var outputText = ""
     @Published var status: StreamStatus = .waiting
     @Published var events: [StreamEvent] = []
+    @Published var activeToolName: String?
+    @Published var activeToolStartTime: Date?
     var onComplete: ((String) -> Void)?
     var sessionId: String?
 
@@ -52,6 +54,8 @@ class ClaudeProcessManager: ObservableObject {
             self.events = []
             self.outputText = ""
             self.status = .waiting
+            self.activeToolName = nil
+            self.activeToolStartTime = nil
         }
         isStopped = false
         accumulated = ""
@@ -314,15 +318,17 @@ class ClaudeProcessManager: ObservableObject {
                         }
                     }
                     DispatchQueue.main.async {
+                        self.activeToolName = name
+                        self.activeToolStartTime = Date()
                         self.events.append(.toolCall(id: blockId, name: name, input: inputStr))
                     }
                 } else if blockType == "text",
                           let text = block["text"] as? String {
                     accumulated = text
-                    // Don't set hasText — only show text from "result" event
                 }
             }
-            return nil
+            // Return accumulated text so intermediate responses are visible
+            return accumulated.isEmpty ? nil : accumulated
         }
 
         // CLI format: user messages contain tool results
@@ -336,6 +342,8 @@ class ClaudeProcessManager: ObservableObject {
                     // Update matching tool call event with output info
                     let preview = String(resultContent.prefix(200))
                     DispatchQueue.main.async {
+                        self.activeToolName = nil
+                        self.activeToolStartTime = nil
                         if let idx = self.events.firstIndex(where: { $0.id == toolUseId }),
                            case let .toolCall(id, name, input) = self.events[idx] {
                             // Append result preview to input for display
@@ -352,6 +360,10 @@ class ClaudeProcessManager: ObservableObject {
     }
     func stop() {
         isStopped = true
+        DispatchQueue.main.async {
+            self.activeToolName = nil
+            self.activeToolStartTime = nil
+        }
         if let proc = process, proc.isRunning {
             let pid = proc.processIdentifier
             // Kill child processes first and wait for completion before
@@ -403,6 +415,62 @@ struct StreamingTimerView: View {
         }
         .onReceive(timer) { _ in
             elapsed += 0.1
+        }
+    }
+}
+
+// MARK: - Active Tool Indicator
+
+struct ActiveToolIndicatorView: View {
+    let toolName: String
+    let startTime: Date
+    @State private var elapsed: TimeInterval = 0
+    @State private var animateDots = false
+
+    let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    private var displayName: String {
+        switch toolName.lowercased() {
+        case "bash": return "Running command"
+        case "read": return "Reading file"
+        case "write": return "Writing file"
+        case "edit": return "Editing file"
+        case "glob": return "Searching files"
+        case "grep": return "Searching content"
+        case "webfetch": return "Fetching page"
+        case "websearch": return "Searching web"
+        default: return "Running \(toolName)"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+
+                Text("\(displayName)\(animateDots ? "..." : "..")")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+
+                Text(String(format: "%.0fs", elapsed))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+
+            if elapsed >= 30 {
+                Text("Press Esc to stop")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.5))
+            }
+        }
+        .onAppear {
+            elapsed = Date().timeIntervalSince(startTime)
+        }
+        .onReceive(timer) { _ in
+            elapsed = Date().timeIntervalSince(startTime)
+            animateDots.toggle()
         }
     }
 }
@@ -707,6 +775,28 @@ private struct AssistantMarkdown: View {
     }
 }
 
+// MARK: - Streaming Content View (observes manager directly for live updates)
+
+struct StreamingContentView: View {
+    @ObservedObject var manager: ClaudeProcessManager
+
+    var body: some View {
+        EventsSummaryView(events: manager.events, isDone: manager.status == .done)
+
+        if manager.status == .waiting || manager.status == .streaming {
+            if let toolName = manager.activeToolName,
+               let startTime = manager.activeToolStartTime {
+                ActiveToolIndicatorView(toolName: toolName, startTime: startTime)
+            }
+            StreamingTimerView()
+        }
+
+        if !manager.outputText.isEmpty {
+            AssistantMarkdown(text: manager.outputText)
+        }
+    }
+}
+
 // MARK: - Chat View (output + input in the floating panel)
 
 private struct ScrollContentHeightKey: PreferenceKey {
@@ -809,6 +899,11 @@ struct ChatView: View {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
+                .onChange(of: viewModel.claudeManager?.activeToolName) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
             }
 
             Divider()
@@ -846,18 +941,7 @@ struct ChatView: View {
             }
 
             if let manager = viewModel.claudeManager {
-                EventsSummaryView(events: manager.events, isDone: manager.status == .done)
-            }
-
-            if let manager = viewModel.claudeManager,
-               manager.status == .waiting || manager.status == .streaming {
-                StreamingTimerView()
-            }
-
-            if let manager = viewModel.claudeManager,
-               !manager.outputText.isEmpty,
-               manager.status == .done {
-                AssistantMarkdown(text: manager.outputText)
+                StreamingContentView(manager: manager)
             }
 
             Spacer().frame(height: 0).id("bottom")
