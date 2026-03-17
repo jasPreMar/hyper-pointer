@@ -47,13 +47,18 @@ private func rightClickCallback(
     return nil
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     var panels: [FloatingPanel] = []
+    @Published private(set) var taskRecords: [TaskSessionRecord] = []
     var hotKeyMonitor: Any?
     fileprivate var eventTap: CFMachPort?
     private var flagsMonitor: Any?
     private var localFlagsMonitor: Any?
     private var statusItem: NSStatusItem?
+    private var legacyStatusMenu: NSMenu?
+    private var commandMenuPanel: CommandMenuPanel?
+    private var commandMenuGlobalMouseMonitor: Any?
+    private var commandMenuLocalMouseMonitor: Any?
     private var onboardingWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var commandKeyHeld = false
@@ -65,6 +70,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateCheckTimer: Timer?
     private var feedbackPopover: NSPopover?
     private let soundPlayer = PTTSoundPlayer()
+    private var taskRecordLookup: [ObjectIdentifier: TaskSessionRecord] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
@@ -116,7 +122,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 existing.isCommandKeyHeld = true
                 existing.restartCommandKeyMode(with: modifierFlags)
             } else {
-                panels.removeAll { !$0.isVisible }
+                panels.removeAll { !$0.isVisible && !$0.preservesTaskHistory }
                 let panel = makePanel()
                 commandKeyPanel = panel
                 panels.append(panel)
@@ -213,6 +219,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.image = NSImage(systemSymbolName: "cursorarrow.motionlines", accessibilityDescription: "HyperPointer")
             button.imagePosition = .imageOnly
             button.toolTip = "HyperPointer"
+            button.target = self
+            button.action = #selector(handleStatusItemClick(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         let bundle = Bundle.main
@@ -255,8 +264,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
+        legacyStatusMenu = menu
         self.statusItem = statusItem
+    }
+
+    @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent else {
+            toggleCommandMenu()
+            return
+        }
+
+        switch event.type {
+        case .rightMouseUp:
+            closeCommandMenu()
+            if let legacyStatusMenu, let button = statusItem?.button {
+                legacyStatusMenu.popUp(
+                    positioning: nil,
+                    at: NSPoint(x: 0, y: button.bounds.height + 6),
+                    in: button
+                )
+            }
+        default:
+            toggleCommandMenu()
+        }
     }
 
     @objc private func handleStatusNewPanel() {
@@ -276,11 +306,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleStatusKillAll() {
+        closeCommandMenu()
         for panel in panels {
             panel.searchViewModel.claudeManager?.stop()
-            panel.close()
+            panel.destroyPersistentTaskWindow()
         }
         panels.removeAll()
+        taskRecords.removeAll()
+        taskRecordLookup.removeAll()
     }
 
     @objc private func handleStatusQuit() {
@@ -346,6 +379,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         refreshApplicationPresentation()
     }
 
+    func openSettingsFromCommandMenu() {
+        closeCommandMenu()
+        showSettings()
+    }
+
     private func showSettings() {
         if let settingsWindow {
             refreshApplicationPresentation()
@@ -383,6 +421,109 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         refreshApplicationPresentation()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func toggleCommandMenu() {
+        if commandMenuPanel?.isVisible == true {
+            closeCommandMenu()
+        } else {
+            showCommandMenu()
+        }
+    }
+
+    private func showCommandMenu() {
+        guard let statusButton = statusItem?.button else { return }
+
+        if commandMenuPanel == nil {
+            let panel = CommandMenuPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+                styleMask: [.borderless, .fullSizeContentView],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isFloatingPanel = true
+            panel.hidesOnDeactivate = false
+            panel.level = .statusBar
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = true
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.isReleasedWhenClosed = false
+            panel.onEscape = { [weak self] in
+                self?.closeCommandMenu()
+            }
+            commandMenuPanel = panel
+        }
+
+        commandMenuPanel?.contentView = NSHostingView(rootView: CommandMenuView(appDelegate: self))
+        positionCommandMenu(relativeTo: statusButton)
+        installCommandMenuEventMonitors()
+        commandMenuPanel?.makeKeyAndOrderFront(nil)
+        statusButton.highlight(true)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func positionCommandMenu(relativeTo statusButton: NSStatusBarButton) {
+        guard let panel = commandMenuPanel,
+              let buttonWindow = statusButton.window else { return }
+
+        let buttonFrame = buttonWindow.frame
+        let targetScreen = NSScreen.screens.first(where: { $0.frame.intersects(buttonFrame) }) ?? NSScreen.main
+        let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+
+        var origin = NSPoint(
+            x: buttonFrame.midX - panel.frame.width / 2,
+            y: buttonFrame.minY - panel.frame.height - 8
+        )
+
+        origin.x = max(visibleFrame.minX + 8, min(origin.x, visibleFrame.maxX - panel.frame.width - 8))
+        origin.y = max(visibleFrame.minY + 8, min(origin.y, visibleFrame.maxY - panel.frame.height - 8))
+        panel.setFrameOrigin(origin)
+    }
+
+    private func installCommandMenuEventMonitors() {
+        tearDownCommandMenuEventMonitors()
+
+        commandMenuGlobalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.dismissCommandMenuIfNeeded(at: NSEvent.mouseLocation)
+        }
+
+        commandMenuLocalMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self else { return event }
+            let screenPoint = event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
+            self.dismissCommandMenuIfNeeded(at: screenPoint)
+            return event
+        }
+    }
+
+    private func tearDownCommandMenuEventMonitors() {
+        if let commandMenuGlobalMouseMonitor {
+            NSEvent.removeMonitor(commandMenuGlobalMouseMonitor)
+            self.commandMenuGlobalMouseMonitor = nil
+        }
+        if let commandMenuLocalMouseMonitor {
+            NSEvent.removeMonitor(commandMenuLocalMouseMonitor)
+            self.commandMenuLocalMouseMonitor = nil
+        }
+    }
+
+    private func dismissCommandMenuIfNeeded(at screenPoint: NSPoint) {
+        guard let panel = commandMenuPanel, panel.isVisible else { return }
+
+        if panel.frame.contains(screenPoint) {
+            return
+        }
+
+        if let statusButtonRect = statusButtonScreenRect(), statusButtonRect.contains(screenPoint) {
+            return
+        }
+
+        closeCommandMenu()
+    }
+
+    private func statusButtonScreenRect() -> NSRect? {
+        guard let buttonWindow = statusItem?.button?.window else { return nil }
+        return buttonWindow.frame
     }
 
     private func refreshApplicationPresentation() {
@@ -452,7 +593,96 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.soundPlayer.playRelease()
             }
         }
+        panel.onPersistentTaskStarted = { [weak self, weak panel] _ in
+            guard let self, let panel else { return }
+            self.registerTaskRecord(for: panel)
+        }
+        panel.onTaskStateChanged = { [weak self, weak panel] _ in
+            guard let self, let panel else { return }
+            self.syncTaskRecord(for: panel)
+        }
+        panel.onPanelDestroyed = { [weak self, weak panel] _ in
+            guard let self, let panel else { return }
+            self.removePanel(panel)
+        }
         return panel
+    }
+
+    func launchTaskFromCommandMenu(query: String) {
+        let panel = makePanel()
+        panels.append(panel)
+        panel.startTaskFromMenu(query: query)
+    }
+
+    func openTaskRecord(_ record: TaskSessionRecord) {
+        record.panel?.reopenPersistentTaskWindow()
+    }
+
+    func stopTaskRecord(_ record: TaskSessionRecord) {
+        record.panel?.searchViewModel.claudeManager?.stop()
+    }
+
+    func deleteTaskRecord(_ record: TaskSessionRecord) {
+        guard let panel = record.panel else {
+            taskRecords.removeAll { $0.id == record.id }
+            return
+        }
+
+        panel.searchViewModel.claudeManager?.stop()
+        panel.destroyPersistentTaskWindow()
+        removePanel(panel)
+    }
+
+    func closeCommandMenu() {
+        tearDownCommandMenuEventMonitors()
+        statusItem?.button?.highlight(false)
+        commandMenuPanel?.orderOut(nil)
+    }
+
+    private func registerTaskRecord(for panel: FloatingPanel) {
+        let key = ObjectIdentifier(panel)
+        if let existing = taskRecordLookup[key] {
+            existing.sync(from: panel)
+            sortTaskRecords()
+            return
+        }
+
+        let record = TaskSessionRecord(panel: panel)
+        taskRecordLookup[key] = record
+        taskRecords.append(record)
+        sortTaskRecords()
+    }
+
+    private func syncTaskRecord(for panel: FloatingPanel) {
+        guard panel.preservesTaskHistory else { return }
+
+        let key = ObjectIdentifier(panel)
+        if let record = taskRecordLookup[key] {
+            record.sync(from: panel)
+        } else {
+            registerTaskRecord(for: panel)
+            return
+        }
+
+        sortTaskRecords()
+    }
+
+    private func removePanel(_ panel: FloatingPanel) {
+        panels.removeAll { $0 === panel }
+
+        let key = ObjectIdentifier(panel)
+        if let record = taskRecordLookup.removeValue(forKey: key) {
+            taskRecords.removeAll { $0.id == record.id }
+        }
+    }
+
+    private func sortTaskRecords() {
+        taskRecords = taskRecords.sorted { lhs, rhs in
+            if lhs.lastActivityAt == rhs.lastActivityAt {
+                return lhs.startedAt > rhs.startedAt
+            }
+            return lhs.lastActivityAt > rhs.lastActivityAt
+        }
     }
 
     func openFeedbackPage() {
@@ -493,7 +723,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func createNewPanel() {
-        panels.removeAll { !$0.isVisible }
+        panels.removeAll { !$0.isVisible && !$0.preservesTaskHistory }
 
         let panel = makePanel()
         panels.append(panel)
@@ -505,7 +735,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for panel in panels where panel.isVisible && !panel.searchViewModel.isChatMode {
             panel.dismiss(restorePreviousFocus: false)
         }
-        panels.removeAll { !$0.isVisible }
+        panels.removeAll { !$0.isVisible && !$0.preservesTaskHistory }
 
         let panel = makePanel()
         panels.append(panel)

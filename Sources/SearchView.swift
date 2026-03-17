@@ -245,18 +245,28 @@ struct FocusedTextField: NSViewRepresentable {
     @Binding var textWidth: CGFloat
     @Binding var textHeight: CGFloat
     var onSubmit: () -> Void
+    var onKeyDown: ((NSEvent) -> Bool)? = nil
+    var font: NSFont = .monospacedSystemFont(ofSize: 13, weight: .regular)
     static let minWidth: CGFloat = 80
     static let maxWidth: CGFloat = 292
     static let maxHeight: CGFloat = 120
 
     final class InputTextView: NSTextView {
         var onWindowAttached: (() -> Void)?
+        var onKeyDown: ((NSEvent) -> Bool)?
 
         override var acceptsFirstResponder: Bool { true }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             onWindowAttached?()
+        }
+
+        override func keyDown(with event: NSEvent) {
+            if onKeyDown?(event) == true {
+                return
+            }
+            super.keyDown(with: event)
         }
     }
 
@@ -269,7 +279,7 @@ struct FocusedTextField: NSViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.allowsUndo = true
-        textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.font = font
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.textColor = .labelColor
@@ -289,6 +299,9 @@ struct FocusedTextField: NSViewRepresentable {
         scrollView.autohidesScrollers = true
 
         context.coordinator.textView = textView
+        textView.onKeyDown = { [weak coordinator = context.coordinator] event in
+            coordinator?.handleKeyDown(event) ?? false
+        }
         textView.onWindowAttached = { [weak coordinator = context.coordinator] in
             coordinator?.attachWindowObserverIfNeeded()
             coordinator?.focusTextView()
@@ -299,6 +312,10 @@ struct FocusedTextField: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
+        if textView.font != font {
+            textView.font = font
+            context.coordinator.updateHeight()
+        }
         if textView.string != text {
             textView.string = text
             context.coordinator.updateHeight()
@@ -312,7 +329,9 @@ struct FocusedTextField: NSViewRepresentable {
             text: $text,
             textWidth: $textWidth,
             textHeight: $textHeight,
-            onSubmit: onSubmit
+            onSubmit: onSubmit,
+            onKeyDown: onKeyDown,
+            font: font
         )
     }
 
@@ -321,6 +340,8 @@ struct FocusedTextField: NSViewRepresentable {
         @Binding var textWidth: CGFloat
         @Binding var textHeight: CGFloat
         let onSubmit: () -> Void
+        let onKeyDown: ((NSEvent) -> Bool)?
+        let font: NSFont
         weak var textView: NSTextView?
         private weak var observedWindow: NSWindow?
         private var windowObserver: NSObjectProtocol?
@@ -329,12 +350,16 @@ struct FocusedTextField: NSViewRepresentable {
             text: Binding<String>,
             textWidth: Binding<CGFloat>,
             textHeight: Binding<CGFloat>,
-            onSubmit: @escaping () -> Void
+            onSubmit: @escaping () -> Void,
+            onKeyDown: ((NSEvent) -> Bool)?,
+            font: NSFont
         ) {
             _text = text
             _textWidth = textWidth
             _textHeight = textHeight
             self.onSubmit = onSubmit
+            self.onKeyDown = onKeyDown
+            self.font = font
         }
 
         deinit {
@@ -345,6 +370,10 @@ struct FocusedTextField: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             text = textView.string
             updateHeight()
+        }
+
+        func handleKeyDown(_ event: NSEvent) -> Bool {
+            onKeyDown?(event) ?? false
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -400,7 +429,6 @@ struct FocusedTextField: NSViewRepresentable {
                   let layoutManager = textView.layoutManager else { return }
             layoutManager.ensureLayout(for: container)
             let size = layoutManager.usedRect(for: container).size
-            let font = textView.font ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
             let longestLineWidth = textView.string
                 .components(separatedBy: .newlines)
                 .map { ($0 as NSString).size(withAttributes: [.font: font]).width }

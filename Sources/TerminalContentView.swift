@@ -32,11 +32,18 @@ enum StreamStatus: Equatable {
 
 class ClaudeProcessManager: ObservableObject {
     @Published var outputText = ""
-    @Published var status: StreamStatus = .waiting
+    @Published var status: StreamStatus = .waiting {
+        didSet {
+            if oldValue != status {
+                onStatusChange?(status)
+            }
+        }
+    }
     @Published var events: [StreamEvent] = []
     @Published var activeToolName: String?
     @Published var activeToolStartTime: Date?
     var onComplete: ((String) -> Void)?
+    var onStatusChange: ((StreamStatus) -> Void)?
     var sessionId: String?
 
     private var process: Process?
