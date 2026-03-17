@@ -167,6 +167,8 @@ class FloatingPanel: NSPanel {
     private var mouseShakeDetector = MouseShakeDetector()
     var isCommandKeyHeld = false
     var onFeedbackShake: (() -> Void)?
+    var onChatWindowOpened: (() -> Void)?
+    var onChatWindowClosed: (() -> Void)?
 
     init() {
         super.init(
@@ -375,6 +377,8 @@ class FloatingPanel: NSPanel {
             message: message,
             screenshotURL: screenshotURL
         )
+
+        onChatWindowOpened?()
     }
 
     private func positionAtCursor() {
@@ -575,9 +579,11 @@ class FloatingPanel: NSPanel {
 
         removeAllMonitors()
         voiceController.cancel()
+        let wasTerminalMode = isTerminalMode
         super.close()
         // Restore panel appearance for potential reuse
-        if isTerminalMode {
+        if wasTerminalMode {
+            onChatWindowClosed?()
             styleMask = [.borderless, .nonactivatingPanel]
             level = .screenSaver
             isOpaque = false
