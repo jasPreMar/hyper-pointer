@@ -1,4 +1,5 @@
 import AppKit
+import MarkdownUI
 import SwiftUI
 
 final class CommandMenuPanel: NSPanel {
@@ -194,6 +195,33 @@ struct CommandMenuView: View {
     }
 
     var body: some View {
+        Group {
+            if let chatRecord = appDelegate.commandMenuChatRecord,
+               let viewModel = chatRecord.panel?.searchViewModel {
+                CommandMenuChatDetailView(
+                    task: chatRecord,
+                    viewModel: viewModel,
+                    onBack: { appDelegate.commandMenuChatRecord = nil }
+                )
+            } else {
+                taskListContent
+            }
+        }
+        .frame(width: Self.panelWidth)
+        .reportHeight(CommandMenuTaskListContentHeightPreferenceKey.self)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .onPreferenceChange(CommandMenuTaskListContentHeightPreferenceKey.self) { height in
+            guard height > 0 else { return }
+            appDelegate.updateCommandMenuSize(CGSize(width: Self.panelWidth, height: height))
+        }
+    }
+
+    private var taskListContent: some View {
         VStack(spacing: 0) {
             inputRow
 
@@ -230,18 +258,6 @@ struct CommandMenuView: View {
             }
 
             bottomBar
-        }
-        .frame(width: Self.panelWidth)
-        .reportHeight(CommandMenuTaskListContentHeightPreferenceKey.self)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
-        .onPreferenceChange(CommandMenuTaskListContentHeightPreferenceKey.self) { height in
-            guard height > 0 else { return }
-            appDelegate.updateCommandMenuSize(CGSize(width: Self.panelWidth, height: height))
         }
         .onAppear {
             hoverSelectionEnabled = false
@@ -337,9 +353,10 @@ struct CommandMenuView: View {
         if queryIsEmpty {
             openSelectedTask()
         } else {
-            appDelegate.launchTaskFromCommandMenu(query: trimmedQuery)
-            query = ""
-            appDelegate.closeCommandMenu()
+            if let record = appDelegate.launchTaskFromCommandMenu(query: trimmedQuery) {
+                query = ""
+                appDelegate.commandMenuChatRecord = record
+            }
         }
     }
 
@@ -361,13 +378,7 @@ struct CommandMenuView: View {
                 return true
             }
 
-            if queryIsEmpty {
-                openSelectedTask()
-            } else {
-                appDelegate.launchTaskFromCommandMenu(query: trimmedQuery)
-                query = ""
-                appDelegate.closeCommandMenu()
-            }
+            submitInput()
             return true
         case 51:
             if hasCommand && hasShift {
@@ -425,7 +436,6 @@ struct CommandMenuView: View {
 
     private func open(_ task: TaskSessionRecord) {
         appDelegate.openTaskRecord(task)
-        appDelegate.closeCommandMenu()
     }
 
     private func stopSelectedTask() {
@@ -537,7 +547,7 @@ private struct CommandMenuTaskRow: View {
     }
 }
 
-private struct TaskRuntimeStatusView: View {
+struct TaskRuntimeStatusView: View {
     @ObservedObject var task: TaskSessionRecord
     @State private var pulse = false
 
@@ -585,6 +595,124 @@ private struct TaskRuntimeStatusView: View {
         }
 
         return "\(seconds)s"
+    }
+}
+
+private struct CommandMenuChatDetailView: View {
+    @ObservedObject var task: TaskSessionRecord
+    @ObservedObject var viewModel: SearchViewModel
+    let onBack: () -> Void
+
+    @State private var chatTextWidth: CGFloat = FocusedTextField.minWidth
+    @State private var chatTextHeight: CGFloat = 18
+
+    var body: some View {
+        VStack(spacing: 0) {
+            chatHeader
+
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    HStack(alignment: .top, spacing: 0) {
+                        chatTranscript
+                        Spacer(minLength: 0)
+                    }
+                }
+                .onAppear {
+                    proxy.scrollTo("chatBottom", anchor: .bottom)
+                }
+                .onChange(of: viewModel.claudeManager?.outputText) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("chatBottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.chatHistory.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("chatBottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("chatBottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.claudeManager?.status) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("chatBottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.claudeManager?.activeToolName) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("chatBottom", anchor: .bottom)
+                    }
+                }
+            }
+
+            Divider()
+
+            PanelInputRow(
+                viewModel: viewModel,
+                textWidth: $chatTextWidth,
+                textHeight: $chatTextHeight,
+                expandsTextField: true
+            )
+        }
+        .frame(height: 520)
+    }
+
+    private var chatHeader: some View {
+        HStack(spacing: 12) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            if let icon = task.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+
+            Text(task.title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 16)
+
+            TaskRuntimeStatusView(task: task)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
+    private var chatTranscript: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(viewModel.chatHistory.enumerated()), id: \.offset) { _, entry in
+                if entry.role == "user" {
+                    Text("> \(entry.text)")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.secondary)
+                } else {
+                    EventsSummaryView(events: entry.events, isDone: true)
+                    AssistantMarkdown(text: entry.text)
+                }
+            }
+
+            if let manager = viewModel.claudeManager {
+                StreamingContentView(manager: manager)
+            }
+
+            Spacer().frame(height: 0).id("chatBottom")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 }
 

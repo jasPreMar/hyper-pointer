@@ -80,6 +80,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var taskRecordLookup: [ObjectIdentifier: TaskSessionRecord] = [:]
     @Published var commandMenuVoiceState: SearchViewModel.VoiceState = .idle
     @Published var commandMenuVoiceLevel: CGFloat = 0
+    @Published var commandMenuChatRecord: TaskSessionRecord?
     private lazy var ghostCursorStore = GhostCursorStore(playClickSound: { [weak self] in
         self?.soundPlayer.playGhostCursorClick()
     })
@@ -484,7 +485,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    private func showCommandMenu(from source: CommandMenuPresentationSource) {
+    private func showCommandMenu(from source: CommandMenuPresentationSource, navigateToChat: TaskSessionRecord? = nil) {
+        commandMenuChatRecord = navigateToChat
+
         if commandMenuPanel == nil {
             let panel = CommandMenuPanel(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
@@ -501,7 +504,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.isReleasedWhenClosed = false
             panel.onEscape = { [weak self] in
-                self?.closeCommandMenu()
+                self?.handleCommandMenuEscape()
             }
             commandMenuPanel = panel
         }
@@ -729,6 +732,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self.ghostCursorStore.unregisterTask(panel.taskId)
             self.removePanel(panel)
         }
+        panel.onTransitionToCommandMenu = { [weak self, weak panel] _ in
+            guard let self, let panel else { return }
+            panel.dismiss(restorePreviousFocus: false)
+            let key = ObjectIdentifier(panel)
+            guard let record = self.taskRecordLookup[key] else { return }
+            self.showCommandMenu(from: .invokeHotKey, navigateToChat: record)
+        }
         panel.onGhostCursorIntent = { [weak self, weak panel] intent in
             guard let self, let panel else { return }
             self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
@@ -752,56 +762,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         return panel
     }
 
-    func launchTaskFromCommandMenu(query: String) {
+    @discardableResult
+    func launchTaskFromCommandMenu(query: String) -> TaskSessionRecord? {
         let panel = makePanel()
         panels.append(panel)
-        panel.startTaskFromMenu(query: query)
+        panel.startTaskFromMenuHeadless(query: query)
+        let key = ObjectIdentifier(panel)
+        return taskRecordLookup[key]
     }
 
     func openTaskRecord(_ record: TaskSessionRecord) {
-        if let panel = record.panel {
-            panel.reopenPersistentTaskWindow()
-            return
-        }
-
-        // Reopen a persisted session that has no live panel
-        guard let persistedId = record.persistedSessionId else { return }
-        let sessions = ChatSessionStore.shared.loadAll()
-        guard let session = sessions.first(where: { $0.id == persistedId }) else { return }
-
-        let panel = makePanel()
-        panels.append(panel)
-        panel.persistedSessionId = persistedId
-
-        // Restore working directory
-        let workingDirectoryURL: URL?
-        if let path = session.workingDirectoryPath {
-            workingDirectoryURL = URL(fileURLWithPath: path)
-        } else {
-            workingDirectoryURL = nil
-        }
-
-        // Populate chat history from persisted messages
-        panel.searchViewModel.chatHistory = session.messages.map {
-            (role: $0.role, text: $0.text, events: [] as [StreamEvent])
-        }
-        panel.searchViewModel.currentSessionId = session.sessionId
-        panel.searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
-        panel.searchViewModel.isChatMode = true
-
-        // Transition to terminal mode to show the restored chat
-        panel.transitionToTerminal(
-            message: "",
-            workingDirectoryURL: workingDirectoryURL,
-            centerWindow: true,
-            restoreOnly: true
-        )
-
-        // Re-associate the record with the live panel
-        record.panel = panel
-        let key = ObjectIdentifier(panel)
-        taskRecordLookup[key] = record
-        record.sync(from: panel)
+        ensureTaskHasLivePanel(record)
+        commandMenuChatRecord = record
     }
 
     func stopTaskRecord(_ record: TaskSessionRecord) {
@@ -833,12 +805,53 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func closeCommandMenu() {
+        commandMenuChatRecord = nil
         commandMenuVoiceController.cancel()
         commandMenuVoiceState = .idle
         commandMenuVoiceLevel = 0
         tearDownCommandMenuEventMonitors()
         statusItem?.button?.highlight(false)
         commandMenuPanel?.orderOut(nil)
+    }
+
+    func handleCommandMenuEscape() {
+        if let chatRecord = commandMenuChatRecord {
+            if let manager = chatRecord.panel?.searchViewModel.claudeManager,
+               manager.status == .waiting || manager.status == .streaming {
+                manager.stop()
+            } else {
+                commandMenuChatRecord = nil
+            }
+        } else {
+            closeCommandMenu()
+        }
+    }
+
+    func ensureTaskHasLivePanel(_ record: TaskSessionRecord) {
+        if record.panel != nil { return }
+
+        guard let persistedId = record.persistedSessionId else { return }
+        let sessions = ChatSessionStore.shared.loadAll()
+        guard let session = sessions.first(where: { $0.id == persistedId }) else { return }
+
+        let panel = makePanel()
+        panels.append(panel)
+        panel.persistedSessionId = persistedId
+
+        let workingDirectoryURL = session.workingDirectoryPath.map { URL(fileURLWithPath: $0) }
+
+        panel.searchViewModel.chatHistory = session.messages.map {
+            (role: $0.role, text: $0.text, events: [] as [StreamEvent])
+        }
+        panel.searchViewModel.currentSessionId = session.sessionId
+        panel.searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+
+        panel.restoreHeadless(workingDirectoryURL: workingDirectoryURL)
+
+        record.panel = panel
+        let key = ObjectIdentifier(panel)
+        taskRecordLookup[key] = record
+        record.sync(from: panel)
     }
 
     private func registerTaskRecord(for panel: FloatingPanel) {
