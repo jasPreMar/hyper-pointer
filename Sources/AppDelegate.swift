@@ -80,16 +80,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var taskRecordLookup: [ObjectIdentifier: TaskSessionRecord] = [:]
     @Published var commandMenuVoiceState: SearchViewModel.VoiceState = .idle
     @Published var commandMenuVoiceLevel: CGFloat = 0
+    private lazy var ghostCursorStore = GhostCursorStore(playClickSound: { [weak self] in
+        self?.soundPlayer.playGhostCursorClick()
+    })
+    private var ghostCursorOverlayCoordinator: GhostCursorOverlayCoordinator?
+    private var workspaceNotificationObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         AppSettings.registerDefaults()
         configureCommandMenuVoiceController()
+        ghostCursorOverlayCoordinator = GhostCursorOverlayCoordinator(store: ghostCursorStore)
+        setupGhostCursorWorkspaceObservers()
         setupMainMenu()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         setupStatusItem()
         checkForUpdateInBackground()
         setupRightClickTapIfNeeded()
+        loadPersistedChatSessions()
         showOnboardingIfNeeded()
 
         // Global hotkey: selected invoke key + Space toggles the task overlay.
@@ -343,12 +351,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @objc private func handleStatusKillAll() {
         closeCommandMenu()
         for panel in panels {
+            panel.saveChatSession()
             panel.searchViewModel.claudeManager?.stop()
             panel.destroyPersistentTaskWindow()
+            ghostCursorStore.unregisterTask(panel.taskId)
         }
         panels.removeAll()
+        // Reload persisted sessions so they remain visible
         taskRecords.removeAll()
         taskRecordLookup.removeAll()
+        loadPersistedChatSessions()
     }
 
     @objc private func handleStatusQuit() {
@@ -417,6 +429,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func openSettingsFromCommandMenu() {
         closeCommandMenu()
         showSettings()
+    }
+
+    func openFeedbackFromCommandMenu(draft: String? = nil) {
+        closeCommandMenu()
+        openFeedbackPage(draft: draft)
     }
 
     private func showSettings() {
@@ -677,27 +694,59 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         panel.onFeedbackShake = { [weak self] in
             self?.openFeedbackPage()
         }
-        panel.onMessageSent = { [weak self] in
+        panel.onMessageSent = { [weak self, weak panel] in
             if UserDefaults.standard.bool(forKey: "chimeEnabled") {
                 self?.soundPlayer.playPress()
             }
+            guard let self, let panel else { return }
+            self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
+            self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
         }
-        panel.onStreamingComplete = { [weak self] in
+        panel.onStreamingComplete = { [weak self, weak panel] in
             if UserDefaults.standard.bool(forKey: "chimeEnabled") {
                 self?.soundPlayer.playRelease()
             }
+            guard let self, let panel else { return }
+            self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
         }
         panel.onPersistentTaskStarted = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
             self.registerTaskRecord(for: panel)
+            self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
+            self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
         }
         panel.onTaskStateChanged = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
             self.syncTaskRecord(for: panel)
+            self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
+            if !panel.isTaskRunning {
+                self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
+            }
         }
         panel.onPanelDestroyed = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
+            self.ghostCursorStore.unregisterTask(panel.taskId)
             self.removePanel(panel)
+        }
+        panel.onGhostCursorIntent = { [weak self, weak panel] intent in
+            guard let self, let panel else { return }
+            self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
+
+            guard intent.revealsCursor else {
+                self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
+                return
+            }
+
+            self.ghostCursorStore.setTaskVisible(panel.taskId, visible: true)
+            let activity = GhostCursorResolver.resolve(
+                taskId: panel.taskId,
+                intent: intent,
+                context: panel.ghostCursorResolutionContext
+            )
+            self.ghostCursorStore.emit(activity: activity)
+            if case .appLaunch(let appName) = intent {
+                self.ghostCursorStore.trackPendingLaunch(taskId: panel.taskId, appName: appName)
+            }
         }
         return panel
     }
@@ -709,14 +758,69 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func openTaskRecord(_ record: TaskSessionRecord) {
-        record.panel?.reopenPersistentTaskWindow()
+        if let panel = record.panel {
+            panel.reopenPersistentTaskWindow()
+            return
+        }
+
+        // Reopen a persisted session that has no live panel
+        guard let persistedId = record.persistedSessionId else { return }
+        let sessions = ChatSessionStore.shared.loadAll()
+        guard let session = sessions.first(where: { $0.id == persistedId }) else { return }
+
+        let panel = makePanel()
+        panels.append(panel)
+        panel.persistedSessionId = persistedId
+
+        // Restore working directory
+        let workingDirectoryURL: URL?
+        if let path = session.workingDirectoryPath {
+            workingDirectoryURL = URL(fileURLWithPath: path)
+        } else {
+            workingDirectoryURL = nil
+        }
+
+        // Populate chat history from persisted messages
+        panel.searchViewModel.chatHistory = session.messages.map {
+            (role: $0.role, text: $0.text, events: [] as [StreamEvent])
+        }
+        panel.searchViewModel.currentSessionId = session.sessionId
+        panel.searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+        panel.searchViewModel.isChatMode = true
+
+        // Transition to terminal mode to show the restored chat
+        panel.transitionToTerminal(
+            message: "",
+            workingDirectoryURL: workingDirectoryURL,
+            centerWindow: true,
+            restoreOnly: true
+        )
+
+        // Re-associate the record with the live panel
+        record.panel = panel
+        let key = ObjectIdentifier(panel)
+        taskRecordLookup[key] = record
+        record.sync(from: panel)
     }
 
     func stopTaskRecord(_ record: TaskSessionRecord) {
         record.panel?.searchViewModel.claudeManager?.stop()
     }
 
+    func stopAllRunningTaskRecords() {
+        for record in taskRecords where record.isRunning {
+            stopTaskRecord(record)
+        }
+    }
+
     func deleteTaskRecord(_ record: TaskSessionRecord) {
+        // Delete persisted session from disk
+        if let persistedId = record.persistedSessionId {
+            ChatSessionStore.shared.delete(id: persistedId)
+        } else if let panel = record.panel, let persistedId = panel.persistedSessionId {
+            ChatSessionStore.shared.delete(id: persistedId)
+        }
+
         guard let panel = record.panel else {
             taskRecords.removeAll { $0.id == record.id }
             return
@@ -745,6 +849,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         let record = TaskSessionRecord(panel: panel)
+        record.persistedSessionId = panel.persistedSessionId
         taskRecordLookup[key] = record
         taskRecords.append(record)
         sortTaskRecords()
@@ -769,8 +874,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let key = ObjectIdentifier(panel)
         if let record = taskRecordLookup.removeValue(forKey: key) {
-            taskRecords.removeAll { $0.id == record.id }
+            // Keep the record in the list if it has a persisted session on disk
+            if let persistedId = panel.persistedSessionId {
+                record.panel = nil
+                record.persistedSessionId = persistedId
+                record.isWindowVisible = false
+                record.isRunning = false
+            } else {
+                taskRecords.removeAll { $0.id == record.id }
+            }
         }
+    }
+
+    private func loadPersistedChatSessions() {
+        let existingPersistedIds = Set(taskRecords.compactMap(\.persistedSessionId))
+        let sessions = ChatSessionStore.shared.loadAll()
+        for session in sessions where !existingPersistedIds.contains(session.id) {
+            let record = TaskSessionRecord(persisted: session)
+            taskRecords.append(record)
+        }
+        sortTaskRecords()
     }
 
     private func sortTaskRecords() {
@@ -789,6 +912,73 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         if let mainPanel = NSApp.mainWindow as? FloatingPanel, mainPanel.isVisible {
             return mainPanel
+        }
+
+        return nil
+    }
+
+    private func setupGhostCursorWorkspaceObservers() {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+
+        let launched = notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleGhostCursorLaunchNotification(notification)
+        }
+
+        let activated = notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleGhostCursorApplicationNotification(notification)
+        }
+
+        workspaceNotificationObservers = [launched, activated]
+    }
+
+    private func handleGhostCursorApplicationNotification(_ notification: Notification) {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+        ghostCursorStore.handleActivatedApplication(
+            application,
+            windowFrame: frontmostWindowFrame(for: application.processIdentifier)
+        )
+    }
+
+    private func handleGhostCursorLaunchNotification(_ notification: Notification) {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+
+        if frontmostWindowFrame(for: application.processIdentifier) != nil {
+            handleGhostCursorApplicationNotification(notification)
+        }
+    }
+
+    private func frontmostWindowFrame(for pid: pid_t) -> CGRect? {
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return nil
+        }
+
+        for window in windowList {
+            guard (window[kCGWindowOwnerPID as String] as? pid_t) == pid else { continue }
+            let layer = window[kCGWindowLayer as String] as? Int ?? 999
+            guard layer == 0 else { continue }
+
+            var bounds = CGRect.zero
+            if let boundsDictionary = window[kCGWindowBounds as String] as? NSDictionary,
+               CGRectMakeWithDictionaryRepresentation(boundsDictionary as CFDictionary, &bounds),
+               bounds.width > 10,
+               bounds.height > 10 {
+                return bounds
+            }
         }
 
         return nil
@@ -879,10 +1069,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    func openFeedbackPage() {
+    func openFeedbackPage(draft: String? = nil) {
         guard let url = URL(string: "https://prickly-perfume-f62.notion.site/ebd/5ca57834b3ec456eba024dc6ac60a337") else {
             return
         }
+
+        let trimmedDraft = draft?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedDraft, !trimmedDraft.isEmpty {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(trimmedDraft, forType: .string)
+        }
+
         guard let button = statusItem?.button else {
             NSWorkspace.shared.open(url)
             return
@@ -891,11 +1089,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Keep the menu action and shake gesture on the same feedback UI path.
         if let existing = feedbackPopover, existing.isShown {
             existing.performClose(nil)
-            return
+            feedbackPopover = nil
+            if trimmedDraft == nil || trimmedDraft?.isEmpty == true {
+                return
+            }
         }
 
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 580))
-        let focusDelegate = FeedbackWebViewDelegate()
+        let focusDelegate = FeedbackWebViewDelegate(draftText: trimmedDraft)
         webView.navigationDelegate = focusDelegate
         webView.load(URLRequest(url: url))
 
@@ -1029,14 +1230,72 @@ extension AppDelegate: NSWindowDelegate {
 
 private class FeedbackWebViewDelegate: NSObject, WKNavigationDelegate {
     static var associatedKey: UInt8 = 0
+    private let draftText: String?
+
+    init(draftText: String? = nil) {
+        self.draftText = draftText
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // Notion forms render dynamically; delay slightly to let React mount the fields.
-        webView.evaluateJavaScript("""
-            setTimeout(function() {
-                var el = document.querySelector('input[type="text"], input[type="email"], textarea, [contenteditable="true"]');
-                if (el) { el.focus(); }
-            }, 600);
-        """, completionHandler: nil)
+        let draftScriptArgument = draftText.flatMap(Self.jsonEncodedString) ?? "null"
+        webView.evaluateJavaScript(
+            """
+            (function(draftText) {
+                function focusAndPopulateField() {
+                    var selectors = [
+                        'textarea',
+                        'input:not([type="hidden"]):not([type="email"])',
+                        '[contenteditable="true"]',
+                        'input[type="email"]'
+                    ];
+                    var nodes = [];
+                    selectors.forEach(function(selector) {
+                        nodes = nodes.concat(Array.from(document.querySelectorAll(selector)));
+                    });
+
+                    var field = nodes.find(function(node) {
+                        if (!node) { return false; }
+                        if (node.getAttribute('aria-hidden') === 'true') { return false; }
+                        if (node.disabled) { return false; }
+                        return true;
+                    });
+
+                    if (!field) { return false; }
+
+                    field.focus();
+
+                    if (draftText && draftText.length > 0) {
+                        if (field.isContentEditable) {
+                            field.textContent = draftText;
+                        } else {
+                            field.value = draftText;
+                        }
+                        field.dispatchEvent(new Event('input', { bubbles: true }));
+                        field.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+
+                    return true;
+                }
+
+                var attempts = 0;
+                var timer = setInterval(function() {
+                    attempts += 1;
+                    if (focusAndPopulateField() || attempts >= 14) {
+                        clearInterval(timer);
+                    }
+                }, 300);
+            })(\(draftScriptArgument));
+            """,
+            completionHandler: nil
+        )
+    }
+
+    private static func jsonEncodedString(_ string: String) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: [string]),
+              let encoded = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return encoded.dropFirst().dropLast().description
     }
 }

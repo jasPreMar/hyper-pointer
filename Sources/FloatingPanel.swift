@@ -174,6 +174,8 @@ class FloatingPanel: NSPanel {
     private(set) var taskCompletedAt: Date?
     private(set) var taskLastActivityAt: Date?
     private(set) var preservesTaskHistory = false
+    let taskId = UUID()
+    var persistedSessionId: String?
     var isCommandKeyHeld = false
     var onCommandKeyDropped: (() -> Void)?
     var onFeedbackShake: (() -> Void)?
@@ -182,6 +184,7 @@ class FloatingPanel: NSPanel {
     var onPersistentTaskStarted: ((FloatingPanel) -> Void)?
     var onTaskStateChanged: ((FloatingPanel) -> Void)?
     var onPanelDestroyed: ((FloatingPanel) -> Void)?
+    var onGhostCursorIntent: ((GhostCursorIntent) -> Void)?
 
     var taskDisplayTitle: String {
         let fallback = searchViewModel.query.isEmpty ? "New task" : searchViewModel.query
@@ -206,6 +209,24 @@ class FloatingPanel: NSPanel {
         case .done, .error:
             return false
         }
+    }
+
+    var ghostCursorAnchorPoint: CGPoint {
+        if let hoveredScreenPoint = searchViewModel.hoveredScreenPoint {
+            return hoveredScreenPoint
+        }
+        return CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    var ghostCursorResolutionContext: GhostCursorResolutionContext {
+        GhostCursorResolutionContext(
+            panelFrame: isVisible ? frame : nil,
+            hoveredElementFrame: searchViewModel.hoveredElementFrame,
+            hoveredWindowFrame: searchViewModel.hoveredWindowFrame,
+            hoveredScreenPoint: searchViewModel.hoveredScreenPoint,
+            hoveredParts: searchViewModel.hoveredParts,
+            workingDirectoryURL: searchViewModel.currentSessionWorkingDirectoryURL ?? searchViewModel.hoveredWorkingDirectoryURL
+        )
     }
 
     init() {
@@ -386,7 +407,8 @@ class FloatingPanel: NSPanel {
         message: String,
         screenshotURL: URL? = nil,
         workingDirectoryURL: URL? = nil,
-        centerWindow: Bool = false
+        centerWindow: Bool = false,
+        restoreOnly: Bool = false
     ) {
         isTerminalMode = true
         isCursorFollowing = false
@@ -418,6 +440,15 @@ class FloatingPanel: NSPanel {
         NSApp.activate(ignoringOtherApps: true)
         notifyTaskStateChanged()
 
+        if restoreOnly {
+            // Restoring a persisted session — chat history is already populated
+            searchViewModel.query = ""
+            searchViewModel.claudeManager = nil
+            searchViewModel.isChatMode = true
+            searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+            return
+        }
+
         // Switch to chat mode — the PanelContentView handles the rest
         searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query, events: []))
         searchViewModel.query = ""
@@ -437,6 +468,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.claudeManager = manager
         searchViewModel.isChatMode = true
         searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+        notifyTaskStateChanged()
 
         manager.start(
             message: message,
@@ -511,6 +543,31 @@ class FloatingPanel: NSPanel {
         notifyTaskStateChanged()
     }
 
+    func saveChatSession() {
+        guard preservesTaskHistory, !searchViewModel.chatHistory.isEmpty else { return }
+
+        let id = persistedSessionId ?? UUID().uuidString
+        persistedSessionId = id
+
+        let messages = searchViewModel.chatHistory.map {
+            PersistedMessage(role: $0.role, text: $0.text)
+        }
+
+        let session = PersistedChatSession(
+            id: id,
+            sessionId: searchViewModel.currentSessionId,
+            title: taskDisplayTitle,
+            subtitle: taskDisplaySubtitle,
+            messages: messages,
+            startedAt: taskStartedAt ?? Date(),
+            completedAt: taskCompletedAt,
+            lastActivityAt: taskLastActivityAt ?? Date(),
+            workingDirectoryPath: searchViewModel.currentSessionWorkingDirectoryURL?.path
+        )
+
+        ChatSessionStore.shared.save(session)
+    }
+
     private func markTaskActivity(completed: Bool = false) {
         guard preservesTaskHistory else { return }
 
@@ -526,6 +583,11 @@ class FloatingPanel: NSPanel {
                 self?.handleManagerStatusChange(status)
             }
         }
+        manager?.onToolActivity = { [weak self] intent in
+            DispatchQueue.main.async {
+                self?.onGhostCursorIntent?(intent)
+            }
+        }
     }
 
     private func handleManagerStatusChange(_ status: StreamStatus) {
@@ -539,6 +601,7 @@ class FloatingPanel: NSPanel {
             let now = Date()
             taskCompletedAt = now
             taskLastActivityAt = now
+            saveChatSession()
         }
 
         notifyTaskStateChanged()
@@ -789,6 +852,7 @@ class FloatingPanel: NSPanel {
         focusRestorationState = nil
         isDestroyingTaskWindow = false
 
+        saveChatSession()
         removeAllMonitors()
         voiceController.cancel()
         super.close()
