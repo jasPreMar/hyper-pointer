@@ -168,6 +168,7 @@ class FloatingPanel: NSPanel {
     private(set) var taskCompletedAt: Date?
     private(set) var taskLastActivityAt: Date?
     private(set) var preservesTaskHistory = false
+    let taskId = UUID()
     var persistedSessionId: String?
     var isCommandKeyHeld = false
     var onCommandKeyDropped: (() -> Void)?
@@ -177,6 +178,7 @@ class FloatingPanel: NSPanel {
     var onPersistentTaskStarted: ((FloatingPanel) -> Void)?
     var onTaskStateChanged: ((FloatingPanel) -> Void)?
     var onPanelDestroyed: ((FloatingPanel) -> Void)?
+    var onGhostCursorIntent: ((GhostCursorIntent) -> Void)?
 
     var taskDisplayTitle: String {
         let fallback = searchViewModel.query.isEmpty ? "New task" : searchViewModel.query
@@ -201,6 +203,24 @@ class FloatingPanel: NSPanel {
         case .done, .error:
             return false
         }
+    }
+
+    var ghostCursorAnchorPoint: CGPoint {
+        if let hoveredScreenPoint = searchViewModel.hoveredScreenPoint {
+            return hoveredScreenPoint
+        }
+        return CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    var ghostCursorResolutionContext: GhostCursorResolutionContext {
+        GhostCursorResolutionContext(
+            panelFrame: isVisible ? frame : nil,
+            hoveredElementFrame: searchViewModel.hoveredElementFrame,
+            hoveredWindowFrame: searchViewModel.hoveredWindowFrame,
+            hoveredScreenPoint: searchViewModel.hoveredScreenPoint,
+            hoveredParts: searchViewModel.hoveredParts,
+            workingDirectoryURL: searchViewModel.currentSessionWorkingDirectoryURL ?? searchViewModel.hoveredWorkingDirectoryURL
+        )
     }
 
     init() {
@@ -442,6 +462,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.claudeManager = manager
         searchViewModel.isChatMode = true
         searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+        notifyTaskStateChanged()
 
         manager.start(
             message: message,
@@ -554,6 +575,11 @@ class FloatingPanel: NSPanel {
         manager?.onStatusChange = { [weak self] status in
             DispatchQueue.main.async {
                 self?.handleManagerStatusChange(status)
+            }
+        }
+        manager?.onToolActivity = { [weak self] intent in
+            DispatchQueue.main.async {
+                self?.onGhostCursorIntent?(intent)
             }
         }
     }
