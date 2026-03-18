@@ -185,6 +185,7 @@ class FloatingPanel: NSPanel {
     var onTaskStateChanged: ((FloatingPanel) -> Void)?
     var onPanelDestroyed: ((FloatingPanel) -> Void)?
     var onGhostCursorIntent: ((GhostCursorIntent) -> Void)?
+    var onTransitionToCommandMenu: ((FloatingPanel) -> Void)?
 
     var taskDisplayTitle: String {
         let fallback = searchViewModel.query.isEmpty ? "New task" : searchViewModel.query
@@ -249,11 +250,21 @@ class FloatingPanel: NSPanel {
 
         // Wire up the submit callback
         searchViewModel.onSubmit = { [weak self] context, screenshotURL, workingDirectoryURL in
-            self?.transitionToTerminal(
-                message: context,
-                screenshotURL: screenshotURL,
-                workingDirectoryURL: workingDirectoryURL
-            )
+            guard let self else { return }
+            if self.onTransitionToCommandMenu != nil {
+                self.startHeadless(
+                    message: context,
+                    screenshotURL: screenshotURL,
+                    workingDirectoryURL: workingDirectoryURL
+                )
+                self.onTransitionToCommandMenu?(self)
+            } else {
+                self.transitionToTerminal(
+                    message: context,
+                    screenshotURL: screenshotURL,
+                    workingDirectoryURL: workingDirectoryURL
+                )
+            }
         }
         searchViewModel.onMessageSent = { [weak self] in
             self?.markTaskActivity()
@@ -488,6 +499,66 @@ class FloatingPanel: NSPanel {
             workingDirectoryURL: searchViewModel.hoveredWorkingDirectoryURL,
             centerWindow: true
         )
+    }
+
+    func startHeadless(
+        message: String,
+        screenshotURL: URL? = nil,
+        workingDirectoryURL: URL? = nil
+    ) {
+        isTerminalMode = true
+        isCursorFollowing = false
+        removeAllMonitors()
+        beginPersistentTaskIfNeeded()
+
+        searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query, events: []))
+        searchViewModel.query = ""
+
+        let manager = ClaudeProcessManager()
+        manager.onComplete = { [weak self] response in
+            let completedEvents = manager.events
+            manager.outputText = ""
+            manager.events = []
+            self?.searchViewModel.chatHistory.append((role: "assistant", text: response, events: completedEvents))
+            if let sid = manager.sessionId {
+                self?.searchViewModel.currentSessionId = sid
+            }
+            self?.onStreamingComplete?()
+        }
+        searchViewModel.claudeManager = manager
+        searchViewModel.isChatMode = true
+        searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+        notifyTaskStateChanged()
+
+        manager.start(
+            message: message,
+            screenshotURL: screenshotURL,
+            workingDirectoryURL: workingDirectoryURL
+        )
+    }
+
+    func startTaskFromMenuHeadless(query: String) {
+        searchViewModel.configureHomeFolderContext()
+        searchViewModel.query = query
+        let message = searchViewModel.buildContextMessage()
+        let (screenshotURL, _) = searchViewModel.captureFullScreenScreenshot()
+        startHeadless(
+            message: message,
+            screenshotURL: screenshotURL,
+            workingDirectoryURL: searchViewModel.hoveredWorkingDirectoryURL
+        )
+    }
+
+    func restoreHeadless(workingDirectoryURL: URL?) {
+        isTerminalMode = true
+        isCursorFollowing = false
+        removeAllMonitors()
+        beginPersistentTaskIfNeeded()
+
+        searchViewModel.query = ""
+        searchViewModel.claudeManager = nil
+        searchViewModel.isChatMode = true
+        searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
     }
 
     func reopenPersistentTaskWindow() {

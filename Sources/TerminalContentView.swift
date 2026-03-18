@@ -762,7 +762,7 @@ private struct PanelContentSizePreferenceKey: PreferenceKey {
 
 // MARK: - Markdown message renderer
 
-private extension Theme {
+extension Theme {
     static let assistant = Theme()
         .text {
             ForegroundColor(.primary)
@@ -809,7 +809,7 @@ private extension Theme {
         }
 }
 
-private struct AssistantMarkdown: View {
+struct AssistantMarkdown: View {
     let text: String
     var body: some View {
         Markdown(text)

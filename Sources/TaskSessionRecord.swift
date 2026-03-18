@@ -46,6 +46,10 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
         self.isRunning = false
     }
 
+    var searchViewModel: SearchViewModel? {
+        panel?.searchViewModel
+    }
+
     func sync(from panel: FloatingPanel) {
         self.panel = panel
         title = panel.taskDisplayTitle
