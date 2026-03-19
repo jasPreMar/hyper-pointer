@@ -201,7 +201,7 @@ struct CommandMenuView: View {
                 CommandMenuChatDetailView(
                     task: chatRecord,
                     viewModel: viewModel,
-                    onBack: { appDelegate.commandMenuChatRecord = nil }
+                    onBack: { appDelegate.handleCommandMenuBackNavigation() }
                 )
             } else {
                 taskListContent
@@ -346,9 +346,8 @@ struct CommandMenuView: View {
         if queryIsEmpty {
             openSelectedTask()
         } else {
-            if let record = appDelegate.launchTaskFromCommandMenu(query: trimmedQuery) {
+            if appDelegate.launchTaskFromCommandMenu(query: trimmedQuery) != nil {
                 query = ""
-                appDelegate.commandMenuChatRecord = record
             }
         }
     }
