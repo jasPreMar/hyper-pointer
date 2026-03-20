@@ -433,49 +433,6 @@ private struct PermissionsSettingsPane: View {
                     divider
 
                     SettingsPermissionStatusRow(
-                        title: "Calendars",
-                        description: "Allow HyperPointer to read or create calendar events when needed.",
-                        icon: "calendar",
-                        state: permissionState(
-                            isGranted: viewModel.isCalendarsGranted,
-                            isBusy: viewModel.isCalendarsRequestInFlight
-                        ) {
-                            if !viewModel.isCalendarsGranted {
-                                viewModel.requestCalendars(resumeDestination: .settingsPermissions)
-                            }
-                        }
-                    )
-
-                    divider
-
-                    SettingsPermissionStatusRow(
-                        title: "Contacts",
-                        description: "Allow contact lookup and people-related assistance when needed.",
-                        icon: "person.2",
-                        state: permissionState(
-                            isGranted: viewModel.isContactsGranted,
-                            isBusy: viewModel.isContactsRequestInFlight
-                        ) {
-                            if !viewModel.isContactsGranted {
-                                viewModel.requestContacts(resumeDestination: .settingsPermissions)
-                            }
-                        }
-                    )
-
-                    divider
-
-                    SettingsPermissionStatusRow(
-                        title: "Full Disk Access",
-                        description: "Allow access to protected files and folders when tasks require it.",
-                        icon: "externaldrive.badge.shield.half.filled",
-                        state: .action("Grant") {
-                            viewModel.openFullDiskAccessSettings()
-                        }
-                    )
-
-                    divider
-
-                    SettingsPermissionStatusRow(
                         title: "Reminders",
                         description: "Allow HyperPointer to read or create reminders when needed.",
                         icon: "checklist",
@@ -486,17 +443,6 @@ private struct PermissionsSettingsPane: View {
                             if !viewModel.isRemindersGranted {
                                 viewModel.requestReminders(resumeDestination: .settingsPermissions)
                             }
-                        }
-                    )
-
-                    divider
-
-                    SettingsPermissionStatusRow(
-                        title: "App Management",
-                        description: "Allow HyperPointer to manage other apps through macOS controls when needed.",
-                        icon: "square.stack.3d.up",
-                        state: .action("Grant") {
-                            viewModel.openAppManagementSettings()
                         }
                     )
 
