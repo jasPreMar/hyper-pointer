@@ -438,23 +438,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func hasSeenOnboardingForCurrentInstall() -> Bool {
-        let defaults = UserDefaults.standard
-        let installIdentifier = currentOnboardingInstallIdentifier()
-
-        if defaults.string(forKey: onboardingSeenInstallKey) == installIdentifier {
-            return true
-        }
-
-        guard defaults.bool(forKey: onboardingSeenKey) else {
-            return false
-        }
-
-        guard OnboardingViewModel.coreRequirementsReadyForCurrentSystem else {
-            return false
-        }
-
-        defaults.set(installIdentifier, forKey: onboardingSeenInstallKey)
-        return true
+        // Do not infer completion for a new app bundle from legacy global defaults.
+        // A fresh DMG install on a machine that already granted permissions still
+        // needs to show onboarding the first time that installed bundle launches.
+        UserDefaults.standard.string(forKey: onboardingSeenInstallKey) == currentOnboardingInstallIdentifier()
     }
 
     private func currentOnboardingInstallIdentifier() -> String {
