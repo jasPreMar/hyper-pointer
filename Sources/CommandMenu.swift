@@ -701,14 +701,14 @@ private struct CommandMenuChatDetailView: View {
 
     private var chatTranscript: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(viewModel.chatHistory.enumerated()), id: \.offset) { _, entry in
+            ForEach(viewModel.chatHistory) { entry in
                 if entry.role == "user" {
                     Text("> \(entry.text)")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.secondary)
                 } else {
                     EventsSummaryView(events: entry.events, isDone: true)
-                    AssistantMarkdown(text: entry.text)
+                    AssistantContentView(text: entry.text, structuredUI: entry.structuredUI)
                 }
             }
 

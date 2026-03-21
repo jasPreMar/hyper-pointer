@@ -27,7 +27,7 @@ class SearchViewModel: ObservableObject {
             onClaudeManagerChange?(claudeManager)
         }
     }
-    @Published var chatHistory: [(role: String, text: String, events: [StreamEvent])] = []
+    @Published var chatHistory: [ChatMessage] = []
     @Published var voiceState: VoiceState = .idle
     @Published var voiceLevel: CGFloat = 0
     var currentSessionId: String?
@@ -64,14 +64,14 @@ class SearchViewModel: ObservableObject {
 
         if isChatMode {
             // Follow-up message — resume the existing session
-            chatHistory.append((role: "user", text: message, events: []))
+            chatHistory.append(ChatMessage(role: "user", text: message))
             query = ""
             let manager = ClaudeProcessManager()
             manager.onComplete = { [weak self] response in
                 let completedEvents = manager.events
                 manager.outputText = ""
                 manager.events = []
-                self?.chatHistory.append((role: "assistant", text: response, events: completedEvents))
+                self?.chatHistory.append(ChatMessage(role: "assistant", text: response, events: completedEvents, structuredUI: manager.structuredUIResponse))
                 // Update session ID in case it changed
                 if let sid = manager.sessionId {
                     self?.currentSessionId = sid

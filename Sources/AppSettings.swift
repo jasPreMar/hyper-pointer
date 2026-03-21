@@ -30,6 +30,7 @@ enum AppSettings {
         static let ghostCursorEnabled = "ghostCursorEnabled"
         static let ghostCursorClickSoundEnabled = "ghostCursorClickSoundEnabled"
         static let ghostCursorDebugLabelsEnabled = "ghostCursorDebugLabelsEnabled"
+        static let structuredUIEnabled = "structuredUIEnabled"
     }
 
     static func registerDefaults(in defaults: UserDefaults = .standard) {
@@ -42,6 +43,7 @@ enum AppSettings {
             Keys.ghostCursorEnabled: true,
             Keys.ghostCursorClickSoundEnabled: false,
             Keys.ghostCursorDebugLabelsEnabled: false,
+            Keys.structuredUIEnabled: false,
         ])
     }
 
@@ -98,6 +100,11 @@ enum AppSettings {
         set { UserDefaults.standard.set(newValue, forKey: Keys.ghostCursorDebugLabelsEnabled) }
     }
 
+    static var structuredUIEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.structuredUIEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.structuredUIEnabled) }
+    }
+
     static var claudeThinkingMode: String {
         thinkingEnabled ? "enabled" : "disabled"
     }
@@ -145,6 +152,9 @@ final class AppSettingsStore: ObservableObject {
     @Published var ghostCursorDebugLabelsEnabled: Bool {
         didSet { AppSettings.ghostCursorDebugLabelsEnabled = ghostCursorDebugLabelsEnabled }
     }
+    @Published var structuredUIEnabled: Bool {
+        didSet { AppSettings.structuredUIEnabled = structuredUIEnabled }
+    }
 
     init() {
         AppSettings.registerDefaults()
@@ -157,5 +167,6 @@ final class AppSettingsStore: ObservableObject {
         ghostCursorEnabled = AppSettings.ghostCursorEnabled
         ghostCursorClickSoundEnabled = AppSettings.ghostCursorClickSoundEnabled
         ghostCursorDebugLabelsEnabled = AppSettings.ghostCursorDebugLabelsEnabled
+        structuredUIEnabled = AppSettings.structuredUIEnabled
     }
 }

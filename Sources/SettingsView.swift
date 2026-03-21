@@ -302,6 +302,7 @@ private struct ChatSettingsPane: View {
             VStack(spacing: 14) {
                 defaultModelCard
                 fastModeCard
+                structuredUICard
             }
         }
     }
@@ -334,6 +335,38 @@ private struct ChatSettingsPane: View {
                     .frame(width: 150)
                 }
             }
+        }
+    }
+
+    @State private var showStructuredUIPreview = false
+
+    private var structuredUICard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Structured UI")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("When enabled, Claude can render rich UI components (cards, lists, tables) instead of plain markdown.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $settingsStore.structuredUIEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+
+                Button("Preview Structured UI") {
+                    showStructuredUIPreview = true
+                }
+                .font(.system(size: 12, weight: .medium))
+            }
+        }
+        .sheet(isPresented: $showStructuredUIPreview) {
+            StructuredUIPreviewSheet()
         }
     }
 
@@ -616,6 +649,110 @@ private struct SettingsPermissionStatusRow: View {
             Button(label, action: action)
                 .buttonStyle(SettingsPermissionGrantButtonStyle())
         }
+    }
+}
+
+// MARK: - Structured UI Preview Sheet
+
+private struct StructuredUIPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    private var sampleResponse: UIResponse {
+        let json = """
+        {
+            "title": "Project Dashboard",
+            "spoken_summary": "Here is a preview of structured UI components.",
+            "layout": {
+                "type": "vstack",
+                "spacing": 16,
+                "alignment": "leading",
+                "children": [
+                    {
+                        "type": "hstack",
+                        "spacing": 12,
+                        "children": [
+                            {"type": "stat", "label": "Open Issues", "value": "23", "color": "orange", "icon": "exclamationmark.triangle"},
+                            {"type": "stat", "label": "Resolved", "value": "142", "color": "green", "icon": "checkmark.circle"},
+                            {"type": "stat", "label": "In Progress", "value": "8", "color": "blue", "icon": "arrow.triangle.2.circlepath"}
+                        ]
+                    },
+                    {
+                        "type": "card",
+                        "child": {
+                            "type": "vstack",
+                            "alignment": "leading",
+                            "spacing": 8,
+                            "children": [
+                                {"type": "text", "content": "Recent Activity", "style": "headline", "weight": "bold"},
+                                {"type": "text", "content": "Last 7 days across all repositories", "style": "subheadline", "color": "secondary"},
+                                {"type": "divider"},
+                                {"type": "progress", "value": 0.73, "total": 1.0, "label": "Sprint Progress", "color": "blue"}
+                            ]
+                        }
+                    },
+                    {
+                        "type": "chart",
+                        "variant": "bar",
+                        "title": "Commits by Day",
+                        "data": [
+                            {"label": "Mon", "value": 12, "color": "blue"},
+                            {"label": "Tue", "value": 19, "color": "blue"},
+                            {"label": "Wed", "value": 8, "color": "blue"},
+                            {"label": "Thu", "value": 15, "color": "blue"},
+                            {"label": "Fri", "value": 22, "color": "blue"}
+                        ]
+                    },
+                    {
+                        "type": "table",
+                        "title": "Top Contributors",
+                        "headers": ["Name", "Commits", "Lines Changed"],
+                        "rows": [
+                            ["Alice", "34", "+1,240 / -380"],
+                            ["Bob", "28", "+890 / -210"],
+                            ["Charlie", "19", "+560 / -140"]
+                        ]
+                    },
+                    {
+                        "type": "hstack",
+                        "spacing": 8,
+                        "children": [
+                            {"type": "badge", "text": "v2.1.0", "color": "green"},
+                            {"type": "badge", "text": "beta", "color": "orange"},
+                            {"type": "badge", "text": "macOS", "color": "blue"}
+                        ]
+                    }
+                ]
+            }
+        }
+        """
+        return try! JSONDecoder().decode(UIResponse.self, from: json.data(using: .utf8)!)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Structured UI Preview")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding()
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !sampleResponse.title.isEmpty {
+                        Text(sampleResponse.title)
+                            .font(.headline)
+                    }
+                    NodeRenderer(node: sampleResponse.layout)
+                }
+                .padding()
+            }
+        }
+        .frame(width: 500, height: 600)
     }
 }
 

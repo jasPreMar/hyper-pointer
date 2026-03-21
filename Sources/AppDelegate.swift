@@ -904,7 +904,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let workingDirectoryURL = session.workingDirectoryPath.map { URL(fileURLWithPath: $0) }
 
         panel.searchViewModel.chatHistory = session.messages.map {
-            (role: $0.role, text: $0.text, events: [] as [StreamEvent])
+            ChatMessage(role: $0.role, text: $0.text, structuredUI: $0.structuredUI)
         }
         panel.searchViewModel.currentSessionId = session.sessionId
         panel.searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL

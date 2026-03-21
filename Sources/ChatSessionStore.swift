@@ -3,6 +3,13 @@ import Foundation
 struct PersistedMessage: Codable {
     let role: String
     let text: String
+    let structuredUI: UIResponse?
+
+    init(role: String, text: String, structuredUI: UIResponse? = nil) {
+        self.role = role
+        self.text = text
+        self.structuredUI = structuredUI
+    }
 }
 
 struct PersistedChatSession: Codable {
