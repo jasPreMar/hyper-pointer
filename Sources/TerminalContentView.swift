@@ -129,7 +129,7 @@ class ClaudeProcessManager: ObservableObject {
         let currentPath = env["PATH"] ?? "/usr/bin:/bin"
         env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
         env["HP_MESSAGE"] = message
-        env["HP_SYSTEM"] = """
+        var systemPrompt = """
             You are HyperPointer, a cursor-aware AI assistant that lives in a floating panel on \
             macOS. The user summons you by hovering over something on their screen and pressing a \
             hotkey. You appear right at their cursor.
@@ -172,6 +172,60 @@ class ClaudeProcessManager: ObservableObject {
             - Prefer action over explanation. If the intent is clear, just do it.
             - When the task is ambiguous, give a short answer and offer to do more.
             """
+
+        if AppSettings.structuredUIEnabled {
+            systemPrompt += """
+
+
+            ## Structured UI Output
+
+            When your response would benefit from rich formatting (dashboards, summaries, lists, \
+            tables, status overviews), respond with ONLY a JSON object matching this schema — no \
+            markdown, no explanation, no code fences, just raw JSON:
+
+            ```
+            {
+              "title": "Short title for the response",
+              "spoken_summary": "A brief plain-text summary for accessibility/TTS",
+              "layout": <UINode>
+            }
+            ```
+
+            UINode types you can use:
+
+            **Layout:** vstack, hstack, zstack — each has `children` (array of UINode), optional \
+            `spacing` (number), optional `alignment` ("leading"/"trailing"/"center" for vstack, \
+            "top"/"bottom"/"center" for hstack).
+
+            **Text:** `{"type":"text", "content":"...", "style":"headline|title|body|caption|subheadline", \
+            "weight":"bold|semibold|medium", "color":"primary|secondary|red|green|blue|orange|purple"}`
+
+            **Stat:** `{"type":"stat", "label":"...", "value":"...", "icon":"sf.symbol.name", \
+            "color":"...", "size":"large"}`
+
+            **Card:** `{"type":"card", "child": <single UINode>, "padding":16, "cornerRadius":12, "color":"..."}`
+
+            **Chart:** `{"type":"chart", "variant":"bar|pie|line", "title":"...", \
+            "data":[{"label":"...","value":N,"color":"..."}]}`
+
+            **Table:** `{"type":"table", "title":"...", "headers":["..."], "rows":[["..."]]}`
+
+            **List:** `{"type":"list", "items":[<UINode>, ...]}`
+
+            **Badge:** `{"type":"badge", "text":"...", "color":"..."}`
+
+            **Progress:** `{"type":"progress", "value":0.7, "total":1.0, "label":"...", "color":"..."}`
+
+            **Image:** `{"type":"image", "system_name":"sf.symbol.name", "color":"...", "size":"small|large"}`
+
+            **Divider:** `{"type":"divider"}`  **Spacer:** `{"type":"spacer"}`
+
+            Use structured UI when the answer has data, lists, or structure. For simple short \
+            text answers or when you need to run tools, respond with plain text instead.
+            """
+        }
+
+        env["HP_SYSTEM"] = systemPrompt
         process.environment = env
 
         let stdout = Pipe()
@@ -335,6 +389,16 @@ class ClaudeProcessManager: ObservableObject {
                 DispatchQueue.main.async { self.sessionId = sid }
             }
             accumulated = result
+            // Try parsing complete result as structured UI (strip code fences if present)
+            if AppSettings.structuredUIEnabled {
+                let stripped = Self.stripCodeFences(result)
+                if let jsonData = stripped.data(using: .utf8),
+                   let response = try? JSONDecoder().decode(UIResponse.self, from: jsonData) {
+                    DispatchQueue.main.async {
+                        self.structuredUIResponse = response
+                    }
+                }
+            }
             return accumulated
         }
 
@@ -370,12 +434,14 @@ class ClaudeProcessManager: ObservableObject {
                 } else if blockType == "text",
                           let text = block["text"] as? String {
                     accumulated = text
-                    // Try parsing as structured UI JSON when enabled
-                    if AppSettings.structuredUIEnabled,
-                       let jsonData = text.data(using: .utf8),
-                       let response = try? JSONDecoder().decode(UIResponse.self, from: jsonData) {
-                        DispatchQueue.main.async {
-                            self.structuredUIResponse = response
+                    // Try parsing as structured UI JSON when enabled (strip code fences if present)
+                    if AppSettings.structuredUIEnabled {
+                        let stripped = Self.stripCodeFences(text)
+                        if let jsonData = stripped.data(using: .utf8),
+                           let response = try? JSONDecoder().decode(UIResponse.self, from: jsonData) {
+                            DispatchQueue.main.async {
+                                self.structuredUIResponse = response
+                            }
                         }
                     }
                 }
@@ -411,6 +477,22 @@ class ClaudeProcessManager: ObservableObject {
 
         return nil
     }
+    /// Strip markdown code fences (```json ... ``` or ``` ... ```) from LLM output
+    static func stripCodeFences(_ text: String) -> String {
+        var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Remove opening fence: ```json or ```
+        if s.hasPrefix("```") {
+            if let newlineIndex = s.firstIndex(of: "\n") {
+                s = String(s[s.index(after: newlineIndex)...])
+            }
+        }
+        // Remove closing fence
+        if s.hasSuffix("```") {
+            s = String(s.dropLast(3))
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func stop() {
         isStopped = true
         DispatchQueue.main.async {

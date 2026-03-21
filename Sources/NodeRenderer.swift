@@ -179,7 +179,7 @@ struct NodeRenderer: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(Int(n.value / n.total * 100))%")
+                    Text("\(n.total > 0 ? Int(n.value / n.total * 100) : 0)%")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -190,7 +190,7 @@ struct NodeRenderer: View {
                         .fill(Color.gray.opacity(0.2))
                     RoundedRectangle(cornerRadius: 4)
                         .fill(n.color?.resolvedColor ?? .accentColor)
-                        .frame(width: geo.size.width * min(n.value / n.total, 1.0))
+                        .frame(width: geo.size.width * (n.total > 0 ? min(n.value / n.total, 1.0) : 0))
                 }
             }
             .frame(height: 8)
