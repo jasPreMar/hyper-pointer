@@ -465,7 +465,7 @@ class FloatingPanel: NSPanel {
         }
 
         // Switch to chat mode — the PanelContentView handles the rest
-        searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query, events: []))
+        searchViewModel.chatHistory.append(ChatMessage(role: "user", text: searchViewModel.query))
         searchViewModel.query = ""
 
         let manager = ClaudeProcessManager()
@@ -473,7 +473,7 @@ class FloatingPanel: NSPanel {
             let completedEvents = manager.events
             manager.outputText = ""
             manager.events = []
-            self?.searchViewModel.chatHistory.append((role: "assistant", text: response, events: completedEvents))
+            self?.searchViewModel.chatHistory.append(ChatMessage(role: "assistant", text: response, events: completedEvents, structuredUI: manager.structuredUIResponse))
             // Capture session ID for follow-up messages
             if let sid = manager.sessionId {
                 self?.searchViewModel.currentSessionId = sid
@@ -515,7 +515,7 @@ class FloatingPanel: NSPanel {
         removeAllMonitors()
         beginPersistentTaskIfNeeded()
 
-        searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query, events: []))
+        searchViewModel.chatHistory.append(ChatMessage(role: "user", text: searchViewModel.query))
         searchViewModel.query = ""
 
         let manager = ClaudeProcessManager()
@@ -523,7 +523,7 @@ class FloatingPanel: NSPanel {
             let completedEvents = manager.events
             manager.outputText = ""
             manager.events = []
-            self?.searchViewModel.chatHistory.append((role: "assistant", text: response, events: completedEvents))
+            self?.searchViewModel.chatHistory.append(ChatMessage(role: "assistant", text: response, events: completedEvents, structuredUI: manager.structuredUIResponse))
             if let sid = manager.sessionId {
                 self?.searchViewModel.currentSessionId = sid
             }
@@ -625,7 +625,7 @@ class FloatingPanel: NSPanel {
         persistedSessionId = id
 
         let messages = searchViewModel.chatHistory.map {
-            PersistedMessage(role: $0.role, text: $0.text)
+            PersistedMessage(role: $0.role, text: $0.text, structuredUI: $0.structuredUI)
         }
 
         let session = PersistedChatSession(

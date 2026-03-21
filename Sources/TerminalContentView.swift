@@ -42,6 +42,7 @@ class ClaudeProcessManager: ObservableObject {
     @Published var events: [StreamEvent] = []
     @Published var activeToolName: String?
     @Published var activeToolStartTime: Date?
+    @Published var structuredUIResponse: UIResponse?
     var onComplete: ((String) -> Void)?
     var onStatusChange: ((StreamStatus) -> Void)?
     var onToolActivity: ((GhostCursorIntent) -> Void)?
@@ -65,6 +66,7 @@ class ClaudeProcessManager: ObservableObject {
             self.status = .waiting
             self.activeToolName = nil
             self.activeToolStartTime = nil
+            self.structuredUIResponse = nil
         }
         isStopped = false
         accumulated = ""
@@ -368,6 +370,14 @@ class ClaudeProcessManager: ObservableObject {
                 } else if blockType == "text",
                           let text = block["text"] as? String {
                     accumulated = text
+                    // Try parsing as structured UI JSON when enabled
+                    if AppSettings.structuredUIEnabled,
+                       let jsonData = text.data(using: .utf8),
+                       let response = try? JSONDecoder().decode(UIResponse.self, from: jsonData) {
+                        DispatchQueue.main.async {
+                            self.structuredUIResponse = response
+                        }
+                    }
                 }
             }
             // Return accumulated text so intermediate responses are visible
@@ -818,6 +828,26 @@ struct AssistantMarkdown: View {
     }
 }
 
+/// Renders either structured UI or markdown fallback for an assistant message
+struct AssistantContentView: View {
+    let text: String
+    let structuredUI: UIResponse?
+
+    var body: some View {
+        if let ui = structuredUI {
+            VStack(alignment: .leading, spacing: 8) {
+                if !ui.title.isEmpty {
+                    Text(ui.title)
+                        .font(.headline)
+                }
+                NodeRenderer(node: ui.layout)
+            }
+        } else {
+            AssistantMarkdown(text: text)
+        }
+    }
+}
+
 // MARK: - Streaming Content View (observes manager directly for live updates)
 
 struct StreamingContentView: View {
@@ -835,7 +865,7 @@ struct StreamingContentView: View {
         }
 
         if !manager.outputText.isEmpty {
-            AssistantMarkdown(text: manager.outputText)
+            AssistantContentView(text: manager.outputText, structuredUI: manager.structuredUIResponse)
         }
     }
 }
@@ -972,14 +1002,14 @@ struct ChatView: View {
 
     private var transcriptContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(viewModel.chatHistory.enumerated()), id: \.offset) { _, entry in
+            ForEach(viewModel.chatHistory) { entry in
                 if entry.role == "user" {
                     Text("> \(entry.text)")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.secondary)
                 } else {
                     EventsSummaryView(events: entry.events, isDone: true)
-                    AssistantMarkdown(text: entry.text)
+                    AssistantContentView(text: entry.text, structuredUI: entry.structuredUI)
                 }
             }
 
