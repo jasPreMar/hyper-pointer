@@ -14,12 +14,12 @@ When we speak, why not use out freed up digits to point, and make that visible t
 
 ### Argument #2 - Objets & Orientation
 
-Before GUIs, we had command lines. Command lines had two big problems: Memorization and imagination. 
+The original command line interfaces had two big problems: Memorization and imagination. 
 
-**Memorization**
+**Memorization:**
 We had to memorize the syntax for every operation. If you get it wrong, you get an error. 
 
-**Imagination**
+**Imagination:**
 And we had to imagine what's possible rather than discover it. We had to hold what was possible in our head before feeling confident enough to try it.
 
 GUIs solved both. Objects can easily be depicted with metaphors: folders, files, and icons scattered across on a desk. An object then only has a limited number of possible commands that followed. With text, you can cut, copy, and paste, not open or trash. With folders, you can open, duplicate, or rename, not run or refresh. Going object-first made possibilities discoverable.
