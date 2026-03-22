@@ -767,7 +767,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func makePanel() -> FloatingPanel {
         let panel = FloatingPanel()
-        panel.onCommandKeyDropped = { [weak self] in
+        panel.onCommandKeyDropped = { [weak self, weak panel] in
+            guard let panel else { return }
             self?.commandKeyHeld = false
             let keepRealtimeSessionAlive = panel.searchViewModel.voiceState == .listening || panel.searchViewModel.voiceState == .transcribing
             self?.commandKeyPanel = nil
