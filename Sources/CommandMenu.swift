@@ -3,15 +3,31 @@ import MarkdownUI
 import SwiftUI
 
 final class CommandMenuPanel: NSPanel {
+    private static let nativeGlassCornerRadius: CGFloat = 20
+
     var onEscape: (() -> Void)?
     private var dragStartMonitor: Any?
     private var pendingDragEvent: NSEvent?
     private var restingOrigin: NSPoint?
     private var snapBackThreshold: CGFloat = 0
     private var shouldSnapBackToRestingOrigin = false
+    private var hostingView: NSHostingView<AnyView>?
+    private var glassEffectView: NSView?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    func setRootView<Content: View>(_ rootView: Content) {
+        if let hostingView {
+            hostingView.rootView = AnyView(rootView)
+        } else {
+            let hostingView = NSHostingView(rootView: AnyView(rootView))
+            hostingView.autoresizingMask = [.width, .height]
+            self.hostingView = hostingView
+        }
+
+        installSurfaceIfNeeded()
+    }
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .leftMouseDown {
@@ -68,6 +84,34 @@ final class CommandMenuPanel: NSPanel {
         pendingDragEvent = nil
     }
 
+    private func installSurfaceIfNeeded() {
+        guard let hostingView else { return }
+
+        isOpaque = false
+        backgroundColor = .clear
+
+        if #available(macOS 26.0, *) {
+            let glass: NSGlassEffectView
+            if let existingGlass = glassEffectView as? NSGlassEffectView {
+                glass = existingGlass
+            } else {
+                let newGlass = NSGlassEffectView()
+                newGlass.autoresizingMask = [.width, .height]
+                newGlass.style = .regular
+                newGlass.cornerRadius = Self.nativeGlassCornerRadius
+                glassEffectView = newGlass
+                glass = newGlass
+            }
+
+            glass.contentView = hostingView
+            contentView = glass
+            hasShadow = false
+        } else {
+            contentView = hostingView
+            hasShadow = true
+        }
+    }
+
     private func snapBackIfNeeded() {
         guard shouldSnapBackToRestingOrigin,
               let restingOrigin else { return }
@@ -118,6 +162,12 @@ struct CommandMenuView: View {
     @State private var inputRowHeight: CGFloat = Self.fallbackInputRowHeight
     @State private var bottomBarHeight: CGFloat = Self.fallbackBottomBarHeight
 
+    private var usesNativeGlassSurface: Bool {
+        if #available(macOS 26.0, *) {
+            return true
+        }
+        return false
+    }
 
     private var sortedTasks: [TaskSessionRecord] {
         appDelegate.taskRecords.sorted { lhs, rhs in
@@ -209,12 +259,7 @@ struct CommandMenuView: View {
         }
         .frame(width: Self.panelWidth)
         .reportHeight(CommandMenuTaskListContentHeightPreferenceKey.self)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
+        .modifier(CommandMenuSurfaceChrome(usesNativeGlassSurface: usesNativeGlassSurface))
         .onPreferenceChange(CommandMenuTaskListContentHeightPreferenceKey.self) { height in
             guard height > 0 else { return }
             appDelegate.updateCommandMenuSize(CGSize(width: Self.panelWidth, height: height))
@@ -474,6 +519,24 @@ struct CommandMenuView: View {
         appDelegate.stopAllRunningTaskRecords()
     }
 
+}
+
+private struct CommandMenuSurfaceChrome: ViewModifier {
+    let usesNativeGlassSurface: Bool
+
+    func body(content: Content) -> some View {
+        if usesNativeGlassSurface {
+            content
+        } else {
+            content
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
+        }
+    }
 }
 
 private struct CommandMenuTaskRow: View {

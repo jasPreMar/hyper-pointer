@@ -573,7 +573,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             )
             panel.isFloatingPanel = true
             panel.hidesOnDeactivate = false
-            panel.level = .floating
+            panel.level = .modalPanel
             panel.isOpaque = false
             panel.backgroundColor = .clear
             panel.hasShadow = true
@@ -588,7 +588,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if source == .invokeHotKey {
             dismissCommandKeyPanelForCommandMenu()
         }
-        commandMenuPanel?.contentView = NSHostingView(rootView: CommandMenuView(appDelegate: self))
+        commandMenuPanel?.level = .modalPanel
+        commandMenuPanel?.setRootView(CommandMenuView(appDelegate: self))
         positionCommandMenu(for: source)
         installCommandMenuEventMonitors()
         commandMenuPanel?.makeKeyAndOrderFront(nil)
