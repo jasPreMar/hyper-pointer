@@ -296,10 +296,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - Main Menu (key equivalents for text editing)
 
     /// Registers the standard macOS menu structure so window shortcuts continue
-    /// to flow through the responder chain when HyperPointer opens a normal app window.
+    /// to flow through the responder chain when This opens a normal app window.
     private func setupMainMenu() {
         let mainMenu = NSMenu()
-        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "HyperPointer"
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "This"
 
         let appMenuItem = NSMenuItem(title: appName, action: nil, keyEquivalent: "")
         mainMenu.addItem(appMenuItem)
@@ -373,10 +373,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 iconImage.size = NSSize(width: 18, height: 18)
                 button.image = iconImage
             } else {
-                button.image = NSImage(systemSymbolName: "cursorarrow.motionlines", accessibilityDescription: "HyperPointer")
+                button.image = NSImage(systemSymbolName: "cursorarrow.motionlines", accessibilityDescription: "This")
             }
             button.imagePosition = .imageOnly
-            button.toolTip = "HyperPointer"
+            button.toolTip = "This"
             button.target = self
             button.action = #selector(handleStatusItemClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -384,7 +384,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let bundle = Bundle.main
         let shortVersion = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let versionItem = NSMenuItem(title: "HyperPointer v\(shortVersion)", action: nil, keyEquivalent: "")
+        let versionItem = NSMenuItem(title: "This v\(shortVersion)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
 
         let newPanelItem = NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n")
@@ -406,7 +406,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let killAllItem = NSMenuItem(title: "Kill All Tasks", action: #selector(handleStatusKillAll), keyEquivalent: "k")
         killAllItem.target = self
 
-        let quitItem = NSMenuItem(title: "Quit HyperPointer", action: #selector(handleStatusQuit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit This", action: #selector(handleStatusQuit), keyEquivalent: "q")
         quitItem.target = self
 
         let menu = NSMenu()
@@ -529,7 +529,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             backing: .buffered,
             defer: false
         )
-        window.title = "HyperPointer Setup"
+        window.title = "This Setup"
         window.isReleasedWhenClosed = false
         window.center()
         window.contentView = NSHostingView(rootView: OnboardingView(viewModel: viewModel))
@@ -609,7 +609,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             backing: .buffered,
             defer: false
         )
-        window.title = "HyperPointer Settings"
+        window.title = "This Settings"
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
         window.center()

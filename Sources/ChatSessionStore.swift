@@ -42,8 +42,26 @@ final class ChatSessionStore {
 
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        sessionsDirectory = appSupport.appendingPathComponent("HyperPointer/ChatSessions", isDirectory: true)
+        sessionsDirectory = appSupport.appendingPathComponent("This/ChatSessions", isDirectory: true)
         try? FileManager.default.createDirectory(at: sessionsDirectory, withIntermediateDirectories: true)
+        migrateFromLegacyDirectory(appSupport: appSupport)
+    }
+
+    private func migrateFromLegacyDirectory(appSupport: URL) {
+        let legacyDirectory = appSupport.appendingPathComponent("HyperPointer/ChatSessions", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: legacyDirectory.path) else { return }
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: legacyDirectory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        for file in files where file.pathExtension == "json" {
+            let destination = sessionsDirectory.appendingPathComponent(file.lastPathComponent)
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try? FileManager.default.moveItem(at: file, to: destination)
+            }
+        }
+        try? FileManager.default.removeItem(at: legacyDirectory)
     }
 
     private func fileURL(for id: String) -> URL {
