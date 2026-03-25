@@ -197,7 +197,7 @@ jobs:
                xmlns:dc="http://purl.org/dc/elements/1.1/">
             <channel>
               <title>This Updates</title>
-              <link>https://github.com/jasPreMar/hyper-pointer</link>
+              <link>https://github.com/jasPreMar/this</link>
               <description>This changelog</description>
               <language>en</language>
               <item>
@@ -206,7 +206,7 @@ jobs:
                 <sparkle:shortVersionString>${SHORT}.${BUILD}</sparkle:shortVersionString>
                 <pubDate>${PUBDATE}</pubDate>
                 <enclosure
-                  url="https://github.com/jasPreMar/hyper-pointer/releases/download/${TAG}/This.dmg"
+                  url="https://github.com/jasPreMar/this/releases/download/${TAG}/This.dmg"
                   length="${SIZE}"
                   type="application/octet-stream"
                   sparkle:edSignature="${SIGNATURE}" />

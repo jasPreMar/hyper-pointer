@@ -92,7 +92,7 @@ This removes that step:
 To install the latest released build from the terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jasPreMar/hyper-pointer/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jasPreMar/this/main/scripts/install.sh | bash
 ```
 
 That downloads the latest DMG from GitHub Releases, installs `This.app`, opens it, and launches the onboarding wizard.
@@ -100,8 +100,8 @@ That downloads the latest DMG from GitHub Releases, installs `This.app`, opens i
 To build from source:
 
 ```bash
-git clone https://github.com/jasPreMar/hyper-pointer.git
-cd hyper-pointer
+git clone https://github.com/jasPreMar/this.git
+cd this
 make build
 ./.build/debug/This
 ```

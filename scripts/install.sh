@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="This"
-REPO="${THIS_REPO:-jasPreMar/hyper-pointer}"
+REPO="${THIS_REPO:-jasPreMar/this}"
 DMG_URL="https://github.com/${REPO}/releases/latest/download/${APP_NAME}.dmg"
 INSTALL_DIR="${INSTALL_DIR:-/Applications}"
 TMP_DIR="$(mktemp -d)"

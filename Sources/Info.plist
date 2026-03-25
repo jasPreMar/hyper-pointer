@@ -19,27 +19,27 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>This uses AppleScript to automate apps on your Mac when you ask it to perform tasks.</string>
+	<string>"This" uses AppleScript to automate apps on your Mac when you ask it to perform tasks.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>This can read and create calendar events when you ask it to manage your schedule.</string>
+	<string>"This" can read and create calendar events when you ask it to manage your schedule.</string>
 	<key>NSContactsUsageDescription</key>
-	<string>This can look up contacts when you ask it to help with people-related tasks.</string>
+	<string>"This" can look up contacts when you ask it to help with people-related tasks.</string>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>This may access your Desktop folder to help with file management tasks.</string>
+	<string>"This" may access your Desktop folder to help with file management tasks.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>This may access your Documents folder to help with file management tasks.</string>
+	<string>"This" may access your Documents folder to help with file management tasks.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>This may access your Downloads folder to help with file management tasks.</string>
+	<string>"This" may access your Downloads folder to help with file management tasks.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>This uses your microphone for invoke-key voice input.</string>
+	<string>"This" uses your microphone for invoke-key voice input.</string>
 	<key>NSRemindersUsageDescription</key>
-	<string>This can read and create reminders when you ask it to manage your tasks.</string>
+	<string>"This" can read and create reminders when you ask it to manage your tasks.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>This converts your speech to text so you can dictate prompts hands-free.</string>
+	<string>"This" converts your speech to text so you can dictate prompts hands-free.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/jasPreMar/hyper-pointer/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/jasPreMar/this/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>mQXgtNQZ6w86NlL8vf1PK9q2tvD2eO16PKh3Sxu3i2M=</string>
 	<key>SUScheduledCheckInterval</key>
