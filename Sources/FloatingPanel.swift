@@ -434,6 +434,31 @@ class FloatingPanel: NSPanel {
         return false
     }
 
+    var isTypingInputActive: Bool {
+        guard isVisible, !searchViewModel.isCommandKeyMode else { return false }
+        return isScrollOrTextInput(firstResponder as? NSView)
+    }
+
+    func hoverSnapshot(at mouseLocation: CGPoint) -> HoverSnapshot? {
+        guard isVisible, frame.contains(mouseLocation) else { return nil }
+
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "HyperPointer"
+        let target = isTypingInputActive ? "text field" : "panel"
+        let workingDirectoryURL = searchViewModel.currentSessionWorkingDirectoryURL ?? searchViewModel.hoveredWorkingDirectoryURL
+
+        return HoverSnapshot(
+            timestamp: Date(),
+            processID: ProcessInfo.processInfo.processIdentifier,
+            description: "\(appName) → \(target)",
+            parts: [appName, target],
+            selectedText: "",
+            elementFrame: frame,
+            windowFrame: frame,
+            screenPoint: mouseLocation,
+            workingDirectoryURL: workingDirectoryURL
+        )
+    }
+
     func show(at point: NSPoint) {
         searchViewModel.query = ""
         searchViewModel.updateHoveredApp()
