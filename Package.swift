@@ -20,6 +20,10 @@ let package = Package(
             resources: [
                 .process("Resources/A4.wav"),
                 .process("Resources/C5.wav"),
+                .copy("Resources/AppIcon.icon"),
+                .process("Resources/StatusBarIcon.png"),
+                .process("Resources/StatusBarIcon@2x.png"),
+                .process("Resources/StatusBarIcon@3x.png"),
             ],
             // Embed Info.plist so macOS shows proper privacy descriptions in TCC dialogs.
             // Run `swift build` from the package root so the relative path resolves correctly.
