@@ -20,7 +20,7 @@ let package = Package(
             resources: [
                 .process("Resources/A4.wav"),
                 .process("Resources/C5.wav"),
-                .copy("Resources/AppIcon.icon"),
+                .copy("Resources/AppIcon.icns"),
                 .process("Resources/StatusBarIcon.png"),
                 .process("Resources/StatusBarIcon@2x.png"),
                 .process("Resources/StatusBarIcon@3x.png"),
