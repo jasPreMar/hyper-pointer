@@ -368,7 +368,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func setupStatusItem() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "cursorarrow.motionlines", accessibilityDescription: "HyperPointer")
+            if let iconPath = Bundle.main.path(forResource: "StatusBarIcon", ofType: "png"),
+               let iconImage = NSImage(contentsOfFile: iconPath) {
+                iconImage.isTemplate = true
+                iconImage.size = NSSize(width: 18, height: 18)
+                button.image = iconImage
+            } else {
+                button.image = NSImage(systemSymbolName: "cursorarrow.motionlines", accessibilityDescription: "HyperPointer")
+            }
             button.imagePosition = .imageOnly
             button.toolTip = "HyperPointer"
             button.target = self
