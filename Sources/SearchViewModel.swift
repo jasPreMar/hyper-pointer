@@ -305,6 +305,12 @@ class SearchViewModel: ObservableObject {
         hoveredScreenPoint = mouseLocation
 
         guard let rawElement = copyElementAtMouseLocation(mouseLocation) else {
+            if let panelSnapshot = selfPanelHoverSnapshot(at: mouseLocation) {
+                consecutiveContainerResults = 0
+                lastContainerRole = ""
+                applyHoverSnapshot(panelSnapshot, icon: NSApp.applicationIconImage)
+                return panelSnapshot
+            }
             if let desktopSnapshot = desktopHoverSnapshot(at: mouseLocation) {
                 consecutiveContainerResults = 0
                 lastContainerRole = ""
@@ -318,7 +324,7 @@ class SearchViewModel: ObservableObject {
 
         // Detect stale accessibility tree: if cursor is moving but we keep getting
         // the same container-level role, force a fresh query by recreating systemWide
-        var resolvedElement = rawElement
+        var resolvedElement = refineHitTestElement(rawElement, at: mouseLocation)
         if cursorMoved {
             let role = axValue(rawElement, key: kAXRoleAttribute) as? String ?? ""
             if containerRoles.contains(role) && role == lastContainerRole {
@@ -326,7 +332,7 @@ class SearchViewModel: ObservableObject {
                 if consecutiveContainerResults >= staleThreshold {
                     // Force a fresh accessibility query
                     if let freshElement = copyElementAtMouseLocation(mouseLocation) {
-                        resolvedElement = freshElement
+                        resolvedElement = refineHitTestElement(freshElement, at: mouseLocation)
                     }
                     consecutiveContainerResults = 0
                 }
@@ -378,6 +384,11 @@ class SearchViewModel: ObservableObject {
             screenPoint: hoveredScreenPoint,
             workingDirectoryURL: hoveredWorkingDirectoryURL
         )
+        if shouldPreferSelfPanelSnapshot(for: resolvedElement, description: description, at: mouseLocation),
+           let panelSnapshot = selfPanelHoverSnapshot(at: mouseLocation) {
+            applyHoverSnapshot(panelSnapshot, icon: NSApp.applicationIconImage)
+            return panelSnapshot
+        }
         if snapshot.description.isEmpty, let desktopSnapshot = desktopHoverSnapshot(at: mouseLocation) {
             consecutiveContainerResults = 0
             lastContainerRole = ""
@@ -879,6 +890,49 @@ class SearchViewModel: ObservableObject {
         onHoverSnapshotUpdated?(nil)
     }
 
+    private func refineHitTestElement(_ element: AXUIElement, at mouseLocation: CGPoint) -> AXUIElement {
+        if let child = findChildContaining(point: mouseLocation, in: element) {
+            return child
+        }
+        if let better = bestElementCandidate(from: element, at: mouseLocation) {
+            return better
+        }
+
+        var pid: pid_t = 0
+        AXUIElementGetPid(element, &pid)
+        guard pid != 0 else { return element }
+
+        let appElement = AXUIElementCreateApplication(pid)
+        if let focusedWindowValue = axValue(appElement, key: kAXFocusedWindowAttribute) {
+            let focusedWindow = focusedWindowValue as! AXUIElement
+            if let better = bestElementCandidate(from: focusedWindow, at: mouseLocation) {
+                return better
+            }
+        }
+
+        if let focusedValue = axValue(appElement, key: kAXFocusedUIElementAttribute) {
+            let focusedElement = focusedValue as! AXUIElement
+            if let focusedFrame = frame(of: focusedElement),
+               frameContainsMouseLocation(focusedFrame, mouseLocation: mouseLocation),
+               let better = bestElementCandidate(from: focusedElement, at: mouseLocation) {
+                return better
+            }
+        }
+
+        return element
+    }
+
+    private func bestElementCandidate(from element: AXUIElement, at mouseLocation: CGPoint) -> AXUIElement? {
+        let role = axValue(element, key: kAXRoleAttribute) as? String ?? ""
+        if primaryRoles.contains(role) || hasMeaningfulContent(element) {
+            return element
+        }
+        if let child = findChildContaining(point: mouseLocation, in: element) {
+            return child
+        }
+        return findBestChild(in: element)
+    }
+
     private func copyElementAtMouseLocation(_ mouseLocation: CGPoint) -> AXUIElement? {
         for point in accessibilityQueryPoints(for: mouseLocation) {
             let systemWide = AXUIElementCreateSystemWide()
@@ -909,6 +963,13 @@ class SearchViewModel: ObservableObject {
             uniquePoints.append(point)
         }
         return uniquePoints
+    }
+
+    private func selfPanelHoverSnapshot(at mouseLocation: CGPoint) -> HoverSnapshot? {
+        NSApp.orderedWindows
+            .compactMap { $0 as? FloatingPanel }
+            .first { $0.frame.contains(mouseLocation) }?
+            .hoverSnapshot(at: mouseLocation)
     }
 
     private func desktopHoverSnapshot(at mouseLocation: CGPoint) -> HoverSnapshot? {
@@ -968,6 +1029,21 @@ class SearchViewModel: ObservableObject {
         return NSWorkspace.shared.icon(forFile: desktopPath)
     }
 
+    private func shouldPreferSelfPanelSnapshot(for element: AXUIElement, description: String, at mouseLocation: CGPoint) -> Bool {
+        guard selfPanelHoverSnapshot(at: mouseLocation) != nil else { return false }
+
+        var pid: pid_t = 0
+        AXUIElementGetPid(element, &pid)
+        guard pid == ProcessInfo.processInfo.processIdentifier else { return false }
+
+        if description.isEmpty {
+            return true
+        }
+
+        let lastPart = description.components(separatedBy: " → ").last?.lowercased() ?? ""
+        return ["group", "split view", "panel", "window"].contains(lastPart)
+    }
+
     private func childElements(of element: AXUIElement) -> [AXUIElement] {
         let childKeys = [
             kAXChildrenAttribute,
@@ -993,12 +1069,46 @@ class SearchViewModel: ObservableObject {
         return children
     }
 
+    private func findChildContaining(point: CGPoint, in container: AXUIElement, depth: Int = 0) -> AXUIElement? {
+        guard depth < 4 else { return nil }
+
+        let framedChildren = childElements(of: container)
+            .compactMap { child -> (AXUIElement, CGRect)? in
+                guard let childFrame = frame(of: child),
+                      frameContainsMouseLocation(childFrame, mouseLocation: point) else {
+                    return nil
+                }
+                return (child, childFrame)
+            }
+            .sorted { lhs, rhs in
+                (lhs.1.width * lhs.1.height) < (rhs.1.width * rhs.1.height)
+            }
+
+        for (child, _) in framedChildren {
+            if let deeper = findChildContaining(point: point, in: child, depth: depth + 1) {
+                return deeper
+            }
+
+            let role = axValue(child, key: kAXRoleAttribute) as? String ?? ""
+            if primaryRoles.contains(role) || hasMeaningfulContent(child) {
+                return child
+            }
+        }
+
+        return nil
+    }
+
     private func hasMeaningfulContent(_ element: AXUIElement) -> Bool {
         let title = axValue(element, key: kAXTitleAttribute) as? String ?? ""
         let desc = axValue(element, key: kAXDescriptionAttribute) as? String ?? ""
         let value = axValue(element, key: kAXValueAttribute) as? String ?? ""
         let selectedText = axValue(element, key: kAXSelectedTextAttribute) as? String ?? ""
         return !title.isEmpty || !desc.isEmpty || !value.isEmpty || !selectedText.isEmpty
+    }
+
+    private func frameContainsMouseLocation(_ frame: CGRect, mouseLocation: CGPoint) -> Bool {
+        let points = [mouseLocation] + accessibilityQueryPoints(for: mouseLocation)
+        return points.contains(where: { frame.contains($0) })
     }
 
     private func resolvedElementFrame(for element: AXUIElement) -> CGRect? {

@@ -261,6 +261,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func handleLocalKeyDown(_ event: NSEvent) -> NSEvent? {
+        if shouldSuppressQuitShortcut(for: event) {
+            return nil
+        }
+
         guard usesEventTapForCommandMenuHotKey else {
             return event
         }
@@ -272,6 +276,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         toggleCommandMenu(from: .invokeHotKey)
         return nil
+    }
+
+    private func shouldSuppressQuitShortcut(for event: NSEvent) -> Bool {
+        guard event.type == .keyDown,
+              event.keyCode == 12
+        else {
+            return false
+        }
+
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags == [.command] else {
+            return false
+        }
+
+        return panels.contains(where: { $0.isTypingInputActive })
     }
 
     // MARK: - Main Menu (key equivalents for text editing)
