@@ -160,6 +160,8 @@ mkdir -p "$MACOS_PATH" "$RESOURCES_PATH"
 cp "$BINARY_PATH" "$MACOS_PATH/$APP_NAME"
 cp "$ROOT_DIR/Sources/Info.plist" "$CONTENTS_PATH/Info.plist"
 cp "$ROOT_DIR/Sources/Resources"/*.wav "$RESOURCES_PATH/"
+cp -R "$ROOT_DIR/Sources/Resources/AppIcon.icon" "$RESOURCES_PATH/"
+cp "$ROOT_DIR/Sources/Resources"/StatusBarIcon*.png "$RESOURCES_PATH/"
 
 RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 1 -name "${APP_NAME}_*.bundle" -type d 2>/dev/null | head -1)"
 if [[ -n "$RESOURCE_BUNDLE" ]]; then

@@ -368,7 +368,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func setupStatusItem() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "cursorarrow.motionlines", accessibilityDescription: "This")
+            if let iconImage = Bundle.main.image(forResource: "StatusBarIcon") {
+                iconImage.isTemplate = true
+                iconImage.size = NSSize(width: 18, height: 18)
+                button.image = iconImage
+            } else {
+                button.image = NSImage(systemSymbolName: "cursorarrow.motionlines", accessibilityDescription: "This")
+            }
             button.imagePosition = .imageOnly
             button.toolTip = "This"
             button.target = self
