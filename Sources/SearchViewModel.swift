@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import CoreGraphics
+import ThisCore
 
 class SearchViewModel: ObservableObject {
     enum VoiceState: Equatable {
@@ -40,7 +41,6 @@ class SearchViewModel: ObservableObject {
     private var lastCursorPosition: CGPoint = .zero
     private var consecutiveContainerResults: Int = 0
     private var lastContainerRole: String = ""
-    private let staleThreshold = 3
 
     /// Set by FloatingPanel
     var onSubmit: ((String, URL?) -> Void)?
@@ -437,21 +437,6 @@ class SearchViewModel: ObservableObject {
         "company.thebrowser.Browser", "com.vivaldi.Vivaldi"
     ]
 
-    // Interactive/item-level roles — use as primary element
-    private let primaryRoles: Set<String> = [
-        "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXCheckBox",
-        "AXRadioButton", "AXSlider", "AXPopUpButton", "AXComboBox",
-        "AXMenuItem", "AXMenuBarItem", "AXTab", "AXCell", "AXRow",
-        "AXHeading", "AXDockItem", "AXDisclosureTriangle",
-        "AXColorWell", "AXIncrementor",
-        "AXStaticText", "AXImage"
-    ]
-
-    // Container roles — good as ancestor context but too broad as primary
-    private let containerRoles: Set<String> = [
-        "AXList", "AXTable", "AXOutline", "AXToolbar", "AXTabGroup",
-        "AXScrollArea", "AXSplitGroup", "AXGroup"
-    ]
 
     private let meaningfulRoles: Set<String> = {
         var s: Set<String> = [
