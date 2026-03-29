@@ -142,6 +142,22 @@ Each entry includes:
 
 See the `REGRESSIONS.md` file itself for full contents.
 
+### Layer 3: `/regression` Skill (Discovery Workflow)
+
+A custom Claude Code skill invoked via `/regression` that captures newly discovered regressions. When the user finds a regression and types `/regression`, the skill:
+
+1. **Asks what regressed** — short description of the broken behavior
+2. **Finds the relevant code** — searches the codebase to locate the fix/expected behavior
+3. **Appends to `REGRESSIONS.md`** — adds a new entry with:
+   - What the correct behavior is
+   - What file/function it lives in
+   - What the broken state looks like
+   - Never removes or modifies existing entries
+4. **Adds a Swift test** if the behavior is testable as pure logic (extracts into `ThisCore` if needed)
+5. **Commits both** with a message like "Add regression guard: [description]"
+
+This is the primary way `REGRESSIONS.md` grows over time. The user discovers a problem, invokes the skill, and the system captures it permanently.
+
 ### Conductor Integration
 
 **Run script:**
@@ -150,10 +166,33 @@ swift test
 ```
 
 **Code review preferences (addition):**
-> Before approving, verify every item in REGRESSIONS.md still holds. Check the actual source code, not just the diff — regressions often happen in code that wasn't part of the PR's intended changes. If any item is violated, flag it as a blocking issue.
+```
+Before approving any PR, you MUST verify every item in REGRESSIONS.md.
+For each entry:
+1. Read the actual source file and function listed
+2. Confirm the "correct state" matches what's in the code
+3. Confirm the "broken state" is NOT present
+Do not rely on the diff alone — regressions often happen in code that
+wasn't part of the PR's intended changes. If any item is violated,
+flag it as a blocking issue and do not approve.
+```
 
 **General preferences (addition):**
-> This project has regression tests (`swift test`) and a REGRESSIONS.md checklist. Before completing any task, run `swift test`. Do not modify code in ways that break existing tests. If you need to change behavior covered by a test, update the test to match — but flag this to the user.
+```
+This project has regression tests (swift test) and a REGRESSIONS.md
+checklist. Before completing any task, run swift test. Do not modify
+code in ways that break existing tests. If you need to change behavior
+covered by a test, update the test to match — but flag this to the user.
+```
+
+**CLAUDE.md (addition):**
+```
+## Regression tracking
+This project uses REGRESSIONS.md to track behaviors that have regressed before.
+Run `swift test` before completing any task.
+When fixing a bug, check if it should be added to REGRESSIONS.md — invoke
+/regression or manually add an entry.
+```
 
 ## Non-Goals
 

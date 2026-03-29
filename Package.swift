@@ -43,21 +43,11 @@ let package = Package(
                 ])
             ]
         ),
-        .testTarget(
+        .executableTarget(
             name: "ThisTests",
             dependencies: ["ThisCore"],
             path: "Tests/ThisTests",
-            swiftSettings: [
-                .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"])
-            ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                    "-framework", "Testing",
-                    "-Xlinker", "-rpath",
-                    "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                ])
-            ]
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
 )
