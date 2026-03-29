@@ -10,142 +10,6 @@ class FloatingPanel: NSPanel {
         case pinnedFollow
     }
 
-    private struct MouseShakeDetector {
-        private struct Segment {
-            let vector: CGVector
-            let distance: CGFloat
-            let timestamp: TimeInterval
-        }
-
-        private static let resetInterval: TimeInterval = 0.22
-        private static let detectionWindow: TimeInterval = 0.6
-        private static let minimumStepDistance: CGFloat = 6
-        private static let minimumSegmentDistance: CGFloat = 56
-        private static let minimumTotalTravel: CGFloat = 340
-        private static let minimumAverageSpeed: CGFloat = 850
-        private static let maximumReversalAlignment: CGFloat = -0.35
-        private static let requiredSegments = 5
-
-        private var lastPoint: NSPoint?
-        private var lastTimestamp: TimeInterval?
-        private var activeVector: CGVector = .zero
-        private var activeDistance: CGFloat = 0
-        private var segments: [Segment] = []
-
-        mutating func reset() {
-            lastPoint = nil
-            lastTimestamp = nil
-            activeVector = .zero
-            activeDistance = 0
-            segments.removeAll(keepingCapacity: true)
-        }
-
-        mutating func register(point: NSPoint, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
-            defer {
-                lastPoint = point
-                lastTimestamp = timestamp
-            }
-
-            guard let previousPoint = lastPoint,
-                  let previousTimestamp = lastTimestamp else {
-                return false
-            }
-
-            let elapsed = timestamp - previousTimestamp
-            if elapsed > Self.resetInterval {
-                reset()
-                return false
-            }
-
-            let deltaX = point.x - previousPoint.x
-            let deltaY = point.y - previousPoint.y
-            let stepVector = CGVector(dx: deltaX, dy: deltaY)
-            let stepDistance = hypot(deltaX, deltaY)
-            guard stepDistance >= Self.minimumStepDistance else {
-                return false
-            }
-
-            if activeDistance == 0 {
-                activeVector = stepVector
-                activeDistance = stepDistance
-                return false
-            }
-
-            let activeDirection = normalized(activeVector)
-            let projectedDistance = dot(stepVector, activeDirection)
-            if projectedDistance >= 0 {
-                activeVector.dx += stepVector.dx
-                activeVector.dy += stepVector.dy
-                activeDistance += stepDistance
-                return false
-            }
-
-            segments.append(
-                Segment(
-                    vector: activeVector,
-                    distance: activeDistance,
-                    timestamp: previousTimestamp
-                )
-            )
-
-            activeVector = stepVector
-            activeDistance = stepDistance
-
-            trimSegments(after: timestamp)
-            guard qualifiesForShake() else { return false }
-
-            reset()
-            return true
-        }
-
-        private mutating func trimSegments(after timestamp: TimeInterval) {
-            segments.removeAll { timestamp - $0.timestamp > Self.detectionWindow }
-            if segments.count > Self.requiredSegments {
-                segments.removeFirst(segments.count - Self.requiredSegments)
-            }
-        }
-
-        private func qualifiesForShake() -> Bool {
-            guard segments.count == Self.requiredSegments else { return false }
-
-            var previousDirection: CGVector?
-            var totalDistance: CGFloat = 0
-
-            for segment in segments {
-                guard segment.distance >= Self.minimumSegmentDistance else { return false }
-                let direction = normalized(segment.vector)
-                if let previousDirection,
-                   dot(previousDirection, direction) > Self.maximumReversalAlignment {
-                    return false
-                }
-                previousDirection = direction
-                totalDistance += segment.distance
-            }
-
-            guard let firstTimestamp = segments.first?.timestamp,
-                  let lastTimestamp = segments.last?.timestamp,
-                  lastTimestamp - firstTimestamp <= Self.detectionWindow else {
-                return false
-            }
-
-            let duration = lastTimestamp - firstTimestamp
-            guard duration > 0 else { return false }
-
-            return totalDistance >= Self.minimumTotalTravel &&
-                (totalDistance / duration) >= Self.minimumAverageSpeed
-        }
-
-        private func normalized(_ vector: CGVector) -> CGVector {
-            let length = hypot(vector.dx, vector.dy)
-            guard length > 0 else { return .zero }
-            return CGVector(dx: vector.dx / length, dy: vector.dy / length)
-        }
-
-        private func dot(_ lhs: CGVector, _ rhs: CGVector) -> CGFloat {
-            lhs.dx * rhs.dx + lhs.dy * rhs.dy
-        }
-    }
-
     private struct FocusRestorationState {
         weak var app: NSRunningApplication?
         let bundleIdentifier: String?
@@ -172,7 +36,6 @@ class FloatingPanel: NSPanel {
     private var shouldRestoreFocusOnClose = true
     private let voiceController = VoiceDictationController()
     private var pendingRealtimeLogStopWorkItem: DispatchWorkItem?
-    private var mouseShakeDetector = MouseShakeDetector()
     private var safeTriangleApex: NSPoint?
     private var invokeHoldBehavior: InvokeHoldBehavior?
     private var pinnedPauseWorkItem: DispatchWorkItem?
@@ -189,7 +52,6 @@ class FloatingPanel: NSPanel {
     var isCommandKeyHeld = false
     var isPinnedFollowMode: Bool { invokeHoldBehavior == .pinnedFollow }
     var onCommandKeyDropped: (() -> Void)?
-    var onFeedbackShake: (() -> Void)?
     var onMessageSent: (() -> Void)?
     var onStreamingBegan: (() -> Void)?
     var onStreamingComplete: (() -> Void)?
@@ -884,7 +746,6 @@ class FloatingPanel: NSPanel {
         searchViewModel.query = ""
         isCommandKeyVisible = false
         isCursorFollowing = true
-        mouseShakeDetector.reset()
 
         // Show the indicator right away at the current cursor position
         searchViewModel.updateHoveredApp()
@@ -926,7 +787,6 @@ class FloatingPanel: NSPanel {
         if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
         isCursorFollowing = false
-        mouseShakeDetector.reset()
 
         guard isCommandKeyVisible else {
             voiceController.cancel()
@@ -990,7 +850,6 @@ class FloatingPanel: NSPanel {
         invokeHoldBehavior = .cursorFollow
         isCommandKeyVisible = true
         isCursorFollowing = true
-        mouseShakeDetector.reset()
         if searchViewModel.query.isEmpty {
             searchViewModel.isCommandKeyMode = true
         }
@@ -1032,12 +891,6 @@ class FloatingPanel: NSPanel {
         }
 
         let mouseLocation = NSEvent.mouseLocation
-        if mouseShakeDetector.register(point: mouseLocation) {
-            dismiss(restorePreviousFocus: false)
-            onFeedbackShake?()
-            return
-        }
-
         positionAtCursor(using: mouseLocation)
         searchViewModel.updateHoveredApp()
     }
@@ -1073,7 +926,6 @@ class FloatingPanel: NSPanel {
         isCommandKeyVisible = true
         isCursorFollowing = true
         pinnedInputVisible = false
-        mouseShakeDetector.reset()
 
         searchViewModel.updateHoveredApp()
         positionAtCursor()
@@ -1099,12 +951,6 @@ class FloatingPanel: NSPanel {
         guard invokeHoldBehavior == .pinnedFollow else { return }
 
         let mouseLocation = NSEvent.mouseLocation
-
-        if mouseShakeDetector.register(point: mouseLocation) {
-            dismiss(restorePreviousFocus: false)
-            onFeedbackShake?()
-            return
-        }
 
         // If voice has actually transcribed speech, stay in voice mode — just follow
         if voiceController.hasTranscribedSpeech {
@@ -1280,7 +1126,6 @@ class FloatingPanel: NSPanel {
         pinnedLocalMouseMonitor = nil
         cancelPendingDrag()
         cancelPinnedPauseTimer()
-        mouseShakeDetector.reset()
     }
 
     override func close() {

@@ -1027,9 +1027,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self?.commandKeyPanel = nil
             self?.stopHoverLogging(keepRealtimeSessionAlive: keepRealtimeSessionAlive)
         }
-        panel.onFeedbackShake = { [weak self] in
-            self?.openFeedbackPage()
-        }
         panel.onMessageSent = { [weak self, weak panel] in
             guard let self, let panel else { return }
             self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
@@ -1490,7 +1487,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return
         }
 
-        // Keep the menu action and shake gesture on the same feedback UI path.
+        // Toggle the feedback popover if already shown.
         if let existing = feedbackPopover, existing.isShown {
             existing.performClose(nil)
             feedbackPopover = nil
