@@ -4,7 +4,7 @@
 
 ```
 swift build          # Build the app
-swift test           # Run regression tests (MUST pass before completing any task)
+swift run ThisTests           # Run regression tests (MUST pass before completing any task)
 make run             # Build, sign, and run
 ```
 
@@ -12,7 +12,7 @@ make run             # Build, sign, and run
 
 This project uses `REGRESSIONS.md` to track behaviors that have regressed before.
 
-- **Before completing any task:** run `swift test`
+- **Before completing any task:** run `swift run ThisTests`
 - **When fixing a bug:** check if it should be added to `REGRESSIONS.md` — use `/regression` to add an entry
 - **Never remove entries** from `REGRESSIONS.md`
 - **Never modify existing tests** in `Tests/ThisTests/` without flagging to the user — these guard against known regressions
